@@ -1,0 +1,22 @@
+Package: appchecker
+Version: 0.1.0-1
+Section: devel
+Priority: optional
+Architecture: amd64
+Installed-Size: 7100
+Depends: git, libdbus-1-3
+Maintainer: ronylicha <ronylicha@users.noreply.github.com>
+Description: Native Linux TUI for monitoring multiple git repositories
+ AppChecker monitors local development projects with real-time git status,
+ dependency update tracking across npm/cargo/pip/go/composer/gem ecosystems,
+ and severity-based desktop notifications via D-Bus.
+ .
+ Features:
+ - Multi-repository dashboard with keyboard navigation
+ - Automatic project discovery and local Git status scanning
+ - Registry update checks for six package ecosystems
+ - Desktop notifications with quiet hours and batching
+ - Air-gap mode for corporate/offline environments
+ - Reactive filesystem watching and SQLite-backed persistence
+Homepage: https://github.com/ronylicha/appchecker
+License: MIT

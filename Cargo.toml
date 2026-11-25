@@ -1,0 +1,85 @@
+[package]
+name = "appchecker"
+version = "0.1.0"
+edition = "2024"
+authors = ["ronylicha <ronylicha@users.noreply.github.com>"]
+description = "Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health"
+license = "MIT"
+repository = "https://github.com/ronylicha/appchecker"
+homepage = "https://github.com/ronylicha/appchecker"
+readme = "README.md"
+rust-version = "1.85"
+keywords = ["cli", "git", "tui", "dependencies", "monitoring"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "appchecker"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# TUI
+ratatui = { version = "0.29", features = ["crossterm"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Git operations (pure Rust, async-friendly)
+gix = { version = "0.70", default-features = false, features = [
+    "blocking-network-client",
+    "max-performance-safe",
+] }
+
+# Filesystem watching with debounce
+notify = { version = "8", features = ["macos_kqueue"] }
+notify-debouncer-mini = "0.6"
+
+# Desktop notifications (D-Bus / XDG)
+notify-rust = "4"
+
+# Persistence & caching
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Configuration
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Logging / observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+# HTTP client for registry polling
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Semver parsing
+semver = { version = "1", features = ["serde"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Directory walking for auto-discovery
+walkdir = "2"
+
+# Unique IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Async utilities (join_all, etc.)
+futures-util = "0.3"
+
+# Platform directories (config, data, home)
+dirs = "6"
+
+[profile.release]
+strip = true
+lto = "thin"
+opt-level = "z"   # Optimize for size
+panic = "abort"
+codegen-units = 1

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=AppChecker
+Comment=Monitor git repositories and dependency updates
+Exec=appchecker tui
+Icon=appchecker
+Terminal=true
+Type=Application
+Categories=Development;

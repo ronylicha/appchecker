@@ -1,0 +1,13 @@
+/target/
+/.claude/
+/.remember/
+/squashfs-root/
+/debian-binary
+
+# Release artifacts (packaging sources remain tracked)
+/dist/appimagetool
+/dist/appchecker-*.AppImage
+/dist/appimage/AppChecker.AppDir/usr/bin/appchecker
+/dist/deb/*.deb
+/dist/deb/*/usr/bin/appchecker
+/dist/SHA256SUMS

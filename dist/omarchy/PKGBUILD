@@ -1,0 +1,46 @@
+# Maintainer: ronylicha <ronylicha@users.noreply.github.com>
+pkgname=appchecker
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health"
+arch=('x86_64')
+url="https://github.com/ronylicha/appchecker"
+license=('MIT')
+depends=('git' 'libdbus')
+makedepends=('rust' 'cargo')
+source=("git+https://github.com/ronylicha/appchecker.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$srcdir/$pkgname"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+
+    # Binary
+    install -Dm755 target/release/appchecker "$pkgdir/usr/bin/appchecker"
+
+    # Desktop entry
+    install -Dm644 dist/deb/appchecker_0.1.0-1_amd64/usr/share/applications/appchecker.desktop \
+        "$pkgdir/usr/share/applications/appchecker.desktop"
+
+    # Icons
+    install -Dm644 assets/logo.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/appchecker.svg"
+    install -Dm644 dist/appimage/AppChecker.AppDir/appchecker.png \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/appchecker.png"
+
+    # AppStream metadata
+    install -Dm644 dist/appimage/AppChecker.AppDir/usr/share/metainfo/io.github.ronylicha.appchecker.appdata.xml \
+        "$pkgdir/usr/share/metainfo/io.github.ronylicha.appchecker.appdata.xml"
+
+    # License
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+}
