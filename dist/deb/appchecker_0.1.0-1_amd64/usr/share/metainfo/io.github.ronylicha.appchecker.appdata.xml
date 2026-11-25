@@ -17,7 +17,7 @@
   </description>
   <url type="homepage">https://github.com/ronylicha/appchecker</url>
   <url type="bugtracker">https://github.com/ronylicha/appchecker/issues</url>
-  <launchable type="desktop-id">appchecker.desktop</launchable>
+  <launchable type="desktop-id">io.github.ronylicha.appchecker.desktop</launchable>
   <provides>
     <binary>appchecker</binary>
   </provides>

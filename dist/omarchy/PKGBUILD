@@ -28,8 +28,8 @@ package() {
     install -Dm755 target/release/appchecker "$pkgdir/usr/bin/appchecker"
 
     # Desktop entry
-    install -Dm644 dist/deb/appchecker_0.1.0-1_amd64/usr/share/applications/appchecker.desktop \
-        "$pkgdir/usr/share/applications/appchecker.desktop"
+    install -Dm644 dist/deb/appchecker_0.1.0-1_amd64/usr/share/applications/io.github.ronylicha.appchecker.desktop \
+        "$pkgdir/usr/share/applications/io.github.ronylicha.appchecker.desktop"
 
     # Icons
     install -Dm644 assets/logo.svg \
