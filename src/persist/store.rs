@@ -21,6 +21,7 @@ pub enum DbCommand {
     UpsertProject(Project),
     RemoveProject(ProjectId),
     ClearProjectState(ProjectId),
+    Flush(mpsc::Sender<()>),
     Shutdown,
 }
 
@@ -93,6 +94,9 @@ impl Store {
                             if let Err(e) = Self::do_clear_project_state(&conn, project_id) {
                                 warn!("clear_project_state failed: {}", e);
                             }
+                        }
+                        DbCommand::Flush(acknowledge) => {
+                            let _ = acknowledge.send(());
                         }
                         DbCommand::Shutdown => break,
                     }
@@ -248,6 +252,16 @@ impl Store {
                 deps: deps.to_vec(),
             })
             .map_err(|e| AppError::Other(format!("DB channel closed: {}", e)))
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        let (acknowledge, completion) = mpsc::channel();
+        self.cmd_tx
+            .send(DbCommand::Flush(acknowledge))
+            .map_err(|e| AppError::Other(format!("DB channel closed: {}", e)))?;
+        completion
+            .recv()
+            .map_err(|e| AppError::Other(format!("DB writer stopped: {}", e)))
     }
 
     pub fn shutdown(&self) {

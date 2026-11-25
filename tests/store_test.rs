@@ -345,3 +345,18 @@ fn migration_discards_orphaned_legacy_cache_rows() {
     assert_eq!(git, 0);
     std::fs::remove_dir_all(root).ok();
 }
+
+#[test]
+fn flush_waits_for_pending_project_writes() {
+    let root =
+        std::env::temp_dir().join(format!("appchecker-store-flush-{}", uuid::Uuid::new_v4()));
+    let store = Store::open(&root.join("appchecker.db")).unwrap();
+    let project = Project::new("demo".into(), PathBuf::from("/tmp/demo"));
+    store.upsert_project(&project).unwrap();
+
+    store.flush().unwrap();
+
+    assert_eq!(store.list_projects().unwrap().len(), 1);
+    store.shutdown();
+    std::fs::remove_dir_all(root).ok();
+}

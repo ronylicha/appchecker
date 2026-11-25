@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Honor Cargo registry overrides, `GOWORK=auto`, npm user configuration, Go environment files, and system pip/uv settings.
 - Detach the daemon into a real background worker and deduplicate notifications while honoring visibility preferences and digest batching.
 - Allow ordinary Cargo configuration files, preserve project npm precedence, and forward `--interval` to detached workers.
+- Flush pending SQLite writes before loading cached projects at TUI startup, eliminating startup cache races.
 
 ## [0.1.0] - 2026-11-25
 

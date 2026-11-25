@@ -137,6 +137,7 @@ impl TuiApp {
             last_auto_refresh: Instant::now(),
             should_quit: false,
         };
+        let _ = app.store.flush();
         app.reload_cached();
         app
     }
