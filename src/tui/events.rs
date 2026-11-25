@@ -1,87 +1,53 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use std::time::Duration;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-/// Represents user actions parsed from terminal input
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserAction {
-    // Navigation
     MoveUp,
     MoveDown,
     MoveToTop,
     MoveToBottom,
-    SwitchTab(usize),
-
-    // Project management
+    SwitchView(usize),
+    ShowDependencies,
     AddProject,
+    EditProject,
     RemoveProject,
     DiscoverProjects,
     PinProject,
     RefreshProject,
-    OpenProjectDetail,
-
-    // Daemon control
-    StartDaemon,
-    StopDaemon,
-    ToggleAutoRefresh,
-
-    // Config
+    RefreshAll,
+    UpdateDependency,
+    UpdateAll,
     OpenConfig,
-    ChangeScanInterval,
-    ToggleNotifications,
-
-    // UI
     ShowHelp,
     Quit,
+    Close,
     None,
 }
 
-/// Parse terminal events into high-level user actions
-pub fn parse_input(timeout: Duration) -> Option<UserAction> {
-    if !event::poll(timeout).ok()? {
-        return Some(UserAction::None);
-    }
-
-    match event::read().ok()? {
-        Event::Key(key) => Some(parse_key(key)),
-        _ => Some(UserAction::None),
-    }
-}
-
-fn parse_key(key: KeyEvent) -> UserAction {
+pub fn parse_key(key: KeyEvent) -> UserAction {
     match (key.modifiers, key.code) {
-        // Quit
         (_, KeyCode::Char('q')) => UserAction::Quit,
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => UserAction::Quit,
-
-        // Navigation
+        (_, KeyCode::Esc) => UserAction::Close,
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => UserAction::MoveUp,
         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => UserAction::MoveDown,
         (_, KeyCode::Home) | (_, KeyCode::Char('g')) => UserAction::MoveToTop,
         (_, KeyCode::End) | (_, KeyCode::Char('G')) => UserAction::MoveToBottom,
-
-        // Tabs (1-4)
-        (_, KeyCode::Char('1')) => UserAction::SwitchTab(0),
-        (_, KeyCode::Char('2')) => UserAction::SwitchTab(1),
-        (_, KeyCode::Char('3')) => UserAction::SwitchTab(2),
-        (_, KeyCode::Char('4')) => UserAction::SwitchTab(3),
-
-        // Project actions
+        (_, KeyCode::Char('1')) => UserAction::SwitchView(0),
+        (_, KeyCode::Char('2')) => UserAction::SwitchView(1),
+        (_, KeyCode::Char('3')) => UserAction::SwitchView(2),
+        (_, KeyCode::Enter) => UserAction::ShowDependencies,
         (_, KeyCode::Char('a')) => UserAction::AddProject,
+        (_, KeyCode::Char('e')) => UserAction::EditProject,
         (_, KeyCode::Char('d')) => UserAction::RemoveProject,
         (_, KeyCode::Char('f')) => UserAction::DiscoverProjects,
         (_, KeyCode::Char('p')) => UserAction::PinProject,
         (_, KeyCode::Char('r')) => UserAction::RefreshProject,
-        (_, KeyCode::Enter) => UserAction::OpenProjectDetail,
-
-        // Daemon
-        (_, KeyCode::Char('s')) => UserAction::StartDaemon,
-        (_, KeyCode::Char('x')) => UserAction::StopDaemon,
-        (_, KeyCode::Char('t')) => UserAction::ToggleAutoRefresh,
-
-        // Config & help
+        (_, KeyCode::Char('R')) => UserAction::RefreshAll,
+        (_, KeyCode::Char('u')) => UserAction::UpdateDependency,
+        (_, KeyCode::Char('U')) => UserAction::UpdateAll,
         (_, KeyCode::Char('c')) => UserAction::OpenConfig,
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => UserAction::ShowHelp,
-
         _ => UserAction::None,
     }
 }

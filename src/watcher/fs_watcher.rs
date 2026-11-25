@@ -32,7 +32,7 @@ pub struct FsWatcher {
 
 impl FsWatcher {
     /// Create a new watcher. Returns the watcher and a receiver for events.
-    pub fn new(debounce_ms: u64) -> Result<(Self, broadcast::Receiver<WatchEvent>)> {
+    pub fn new(_debounce_ms: u64) -> Result<(Self, broadcast::Receiver<WatchEvent>)> {
         let (event_tx, event_rx) = broadcast::channel(256);
         let (_keepalive, _ka_rx) = mpsc::channel::<()>();
 
@@ -106,20 +106,21 @@ impl FsWatcher {
                             let changed_path = &event.path;
 
                             // Find which project this path belongs to
-                            let project_id = path_map
+                            let project = path_map
                                 .iter()
-                                .find(|(prefix, _)| changed_path.starts_with(prefix))
-                                .map(|(_, id)| *id);
+                                .filter(|(prefix, _)| changed_path.starts_with(prefix))
+                                .max_by_key(|(prefix, _)| prefix.components().count());
 
-                            if let Some(pid) = project_id {
+                            if let Some((project_root, project_id)) = project {
+                                let project_id = *project_id;
                                 let watch_event = if Self::is_git_path(changed_path) {
                                     WatchEvent::GitChanged {
-                                        project_id: pid,
+                                        project_id,
                                         path: changed_path.clone(),
                                     }
-                                } else if Self::is_manifest_path(changed_path) {
+                                } else if Self::is_manifest_path(changed_path, project_root) {
                                     WatchEvent::ManifestChanged {
-                                        project_id: pid,
+                                        project_id,
                                         path: changed_path.clone(),
                                     }
                                 } else {
@@ -164,8 +165,19 @@ impl FsWatcher {
         false
     }
 
-    /// Check if a changed path is a dependency manifest
-    fn is_manifest_path(path: &Path) -> bool {
+    /// Check if a changed path is a dependency manifest at the project root
+    pub fn is_manifest_path(path: &Path, project_root: &Path) -> bool {
+        if path.parent() != Some(project_root) {
+            return false;
+        }
+        if path.components().any(|component| {
+            matches!(
+                component.as_os_str().to_str(),
+                Some("node_modules" | "target" | "vendor" | ".venv" | ".git")
+            )
+        }) {
+            return false;
+        }
         path.file_name()
             .and_then(|n| n.to_str())
             .map(|name| {

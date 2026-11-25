@@ -74,9 +74,9 @@ pub enum Commands {
         #[arg(short, long)]
         paths: Option<String>,
 
-        /// Maximum directory depth
-        #[arg(short, long, default_value = "3")]
-        depth: usize,
+        /// Maximum directory depth (defaults to the configured value)
+        #[arg(short, long)]
+        depth: Option<usize>,
 
         /// Dry run - show what would be added without adding
         #[arg(long)]
@@ -89,9 +89,9 @@ pub enum Commands {
         #[arg(long)]
         foreground: bool,
 
-        /// Scan interval in seconds
-        #[arg(short, long, default_value = "300")]
-        interval: u64,
+        /// Scan interval in seconds (defaults to the configured value)
+        #[arg(short, long)]
+        interval: Option<u64>,
     },
 
     /// Show current configuration

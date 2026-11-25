@@ -1,9 +1,10 @@
 use crate::core::{AppError, DepInfo, GitState, Project, ProjectId, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Messages envoyés au thread d'écriture DB dédié.
@@ -18,6 +19,8 @@ pub enum DbCommand {
         deps: Vec<DepInfo>,
     },
     UpsertProject(Project),
+    RemoveProject(ProjectId),
+    ClearProjectState(ProjectId),
     Shutdown,
 }
 
@@ -28,6 +31,7 @@ pub enum DbCommand {
 pub struct Store {
     cmd_tx: mpsc::Sender<DbCommand>,
     db_path: PathBuf,
+    writer: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl Store {
@@ -39,25 +43,29 @@ impl Store {
 
         // Migrations synchrones avant de passer la main au thread writer
         {
-            let conn = Connection::open(db_path)?;
-            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+            let conn = Self::connect(db_path)?;
+            conn.execute_batch(
+                "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
+            )?;
             Self::run_migrations(&conn)?;
         }
 
         let db_path_owned = db_path.to_path_buf();
         let (cmd_tx, cmd_rx) = mpsc::channel::<DbCommand>();
 
-        thread::Builder::new()
+        let writer = thread::Builder::new()
             .name("appchecker-db".into())
             .spawn(move || {
-                let conn = match Connection::open(&db_path_owned) {
+                let conn = match Self::connect(&db_path_owned) {
                     Ok(c) => c,
                     Err(e) => {
                         tracing::error!("DB writer failed to open {:?}: {}", db_path_owned, e);
                         return;
                     }
                 };
-                let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+                let _ = conn.execute_batch(
+                    "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
+                );
 
                 for cmd in cmd_rx {
                     match cmd {
@@ -76,6 +84,16 @@ impl Store {
                                 warn!("upsert_project failed: {}", e);
                             }
                         }
+                        DbCommand::RemoveProject(project_id) => {
+                            if let Err(e) = Self::do_remove_project(&conn, project_id) {
+                                warn!("remove_project failed: {}", e);
+                            }
+                        }
+                        DbCommand::ClearProjectState(project_id) => {
+                            if let Err(e) = Self::do_clear_project_state(&conn, project_id) {
+                                warn!("clear_project_state failed: {}", e);
+                            }
+                        }
                         DbCommand::Shutdown => break,
                     }
                 }
@@ -85,7 +103,14 @@ impl Store {
         Ok(Self {
             cmd_tx,
             db_path: db_path.to_path_buf(),
+            writer: Arc::new(Mutex::new(Some(writer))),
         })
+    }
+
+    fn connect(db_path: &Path) -> Result<Connection> {
+        let connection = Connection::open(db_path)?;
+        connection.busy_timeout(Duration::from_secs(5))?;
+        Ok(connection)
     }
 
     fn run_migrations(conn: &Connection) -> Result<()> {
@@ -127,14 +152,75 @@ impl Store {
                 update_available INTEGER NOT NULL DEFAULT 0,
                 severity TEXT NOT NULL DEFAULT 'info',
                 checked_at TEXT NOT NULL,
-                UNIQUE(project_id, name, ecosystem)
+                dev_dependency INTEGER NOT NULL DEFAULT 0,
+                manifest_name TEXT NOT NULL DEFAULT '',
+                UNIQUE(project_id, name, ecosystem, dev_dependency, manifest_name)
             );
 
             CREATE INDEX IF NOT EXISTS idx_deps_project ON deps(project_id);
             CREATE INDEX IF NOT EXISTS idx_deps_severity ON deps(severity);
             ",
         )?;
+        let columns: Vec<(String, i32)> = conn
+            .prepare("PRAGMA table_info(deps)")?
+            .query_map([], |row| Ok((row.get(1)?, row.get(3)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        if !columns.iter().any(|(column, _)| column == "dev_dependency") {
+            conn.execute(
+                "ALTER TABLE deps ADD COLUMN dev_dependency INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        if !columns.iter().any(|(column, _)| column == "manifest_name") {
+            conn.execute("ALTER TABLE deps ADD COLUMN manifest_name TEXT", [])?;
+        }
+        if columns
+            .iter()
+            .find(|(column, _)| column == "manifest_name")
+            .map(|(_, not_null)| *not_null == 0)
+            .unwrap_or(true)
+        {
+            Self::migrate_dependency_identities(conn)?;
+        }
         info!("Database migrations applied");
+        Ok(())
+    }
+
+    fn migrate_dependency_identities(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            BEGIN IMMEDIATE;
+            DELETE FROM git_state WHERE project_id NOT IN (SELECT id FROM projects);
+            CREATE TABLE deps_with_identities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                ecosystem TEXT NOT NULL,
+                current_version TEXT NOT NULL,
+                latest_version TEXT,
+                update_available INTEGER NOT NULL DEFAULT 0,
+                severity TEXT NOT NULL DEFAULT 'info',
+                checked_at TEXT NOT NULL,
+                dev_dependency INTEGER NOT NULL DEFAULT 0,
+                manifest_name TEXT NOT NULL DEFAULT '',
+                UNIQUE(project_id, name, ecosystem, dev_dependency, manifest_name)
+            );
+            INSERT INTO deps_with_identities (
+                id, project_id, name, ecosystem, current_version, latest_version,
+                update_available, severity, checked_at, dev_dependency, manifest_name
+            )
+            SELECT
+                id, project_id, name, ecosystem, current_version, latest_version,
+                update_available, severity, checked_at, dev_dependency, COALESCE(manifest_name, '')
+            FROM deps
+            WHERE project_id IN (SELECT id FROM projects);
+            DROP TABLE deps;
+            ALTER TABLE deps_with_identities RENAME TO deps;
+            CREATE INDEX idx_deps_project ON deps(project_id);
+            CREATE INDEX idx_deps_severity ON deps(severity);
+            COMMIT;
+            ",
+        )?;
         Ok(())
     }
 
@@ -166,13 +252,16 @@ impl Store {
 
     pub fn shutdown(&self) {
         let _ = self.cmd_tx.send(DbCommand::Shutdown);
+        if let Some(writer) = self.writer.lock().unwrap().take() {
+            let _ = writer.join();
+        }
     }
 
     // ── Synchronous read API (safe: reads don't mutate Connection) ──
     // These open a separate read-only connection for queries.
 
     pub fn list_projects(&self) -> Result<Vec<Project>> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = Self::connect(&self.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT id, name, path, tags, pinned, notification_overrides, added_at, last_scanned_at FROM projects ORDER BY pinned DESC, name ASC",
         )?;
@@ -212,7 +301,7 @@ impl Store {
     }
 
     pub fn get_git_state(&self, project_id: ProjectId) -> Result<Option<GitState>> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = Self::connect(&self.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT current_branch, head_oid, is_dirty, untracked_count, staged_count, ahead, behind, has_stashes, stash_count, last_fetch_at, scanned_at FROM git_state WHERE project_id = ?1",
         )?;
@@ -249,17 +338,18 @@ impl Store {
         }
     }
 
-    pub fn get_outdated_deps(&self, project_id: ProjectId) -> Result<Vec<DepInfo>> {
-        let conn = Connection::open(&self.db_path)?;
+    pub fn get_deps(&self, project_id: ProjectId) -> Result<Vec<DepInfo>> {
+        let conn = Self::connect(&self.db_path)?;
         let mut stmt = conn.prepare(
-            "SELECT name, ecosystem, current_version, latest_version, update_available, severity, checked_at
-             FROM deps WHERE project_id = ?1 AND update_available = 1
-             ORDER BY CASE severity WHEN 'security' THEN 0 WHEN 'major' THEN 1 WHEN 'minor' THEN 2 ELSE 3 END",
+            "SELECT name, ecosystem, current_version, latest_version, update_available, severity, checked_at, dev_dependency, manifest_name
+             FROM deps WHERE project_id = ?1
+             ORDER BY update_available DESC, name ASC",
         )?;
 
         let deps = stmt
             .query_map(params![project_id.to_string()], |row| {
                 let checked_at_str: String = row.get(6)?;
+                let manifest_name: String = row.get(8)?;
                 Ok(DepInfo {
                     name: row.get(0)?,
                     ecosystem: row
@@ -273,6 +363,8 @@ impl Store {
                         .get::<_, String>(5)?
                         .parse()
                         .unwrap_or(crate::core::UpdateSeverity::Info),
+                    dev_dependency: row.get::<_, i32>(7)? != 0,
+                    manifest_name: (!manifest_name.is_empty()).then_some(manifest_name),
                     checked_at: DateTime::parse_from_rfc3339(&checked_at_str)
                         .map(|dt| dt.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now()),
@@ -283,8 +375,16 @@ impl Store {
         Ok(deps)
     }
 
+    pub fn get_outdated_deps(&self, project_id: ProjectId) -> Result<Vec<DepInfo>> {
+        Ok(self
+            .get_deps(project_id)?
+            .into_iter()
+            .filter(|dependency| dependency.update_available)
+            .collect())
+    }
+
     pub fn get_project_health_summary(&self, project_id: ProjectId) -> Result<(u32, u32, u32)> {
-        let conn = Connection::open(&self.db_path)?;
+        let conn = Self::connect(&self.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT
                 COUNT(*) FILTER (WHERE update_available = 1) as outdated,
@@ -302,12 +402,15 @@ impl Store {
     }
 
     pub fn remove_project(&self, id: ProjectId) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute(
-            "DELETE FROM projects WHERE id = ?1",
-            params![id.to_string()],
-        )?;
-        Ok(())
+        self.cmd_tx
+            .send(DbCommand::RemoveProject(id))
+            .map_err(|e| AppError::Other(format!("DB channel closed: {}", e)))
+    }
+
+    pub fn clear_project_state(&self, project_id: ProjectId) -> Result<()> {
+        self.cmd_tx
+            .send(DbCommand::ClearProjectState(project_id))
+            .map_err(|e| AppError::Other(format!("DB channel closed: {}", e)))
     }
 
     // ── Private sync implementations (called from writer thread) ────
@@ -319,14 +422,30 @@ impl Store {
             .as_ref()
             .and_then(|o| serde_json::to_string(o).ok());
 
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        let existing_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM projects WHERE path = ?1",
+                params![project.path.to_string_lossy()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing_id.as_deref() != Some(project.id.to_string().as_str()) {
+            tx.execute(
+                "DELETE FROM projects WHERE path = ?1",
+                params![project.path.to_string_lossy()],
+            )?;
+        }
+        tx.execute(
             "INSERT INTO projects (id, name, path, tags, pinned, notification_overrides, added_at, last_scanned_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(path) DO UPDATE SET
+             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
+                path = excluded.path,
                 tags = excluded.tags,
                 pinned = excluded.pinned,
-                notification_overrides = excluded.notification_overrides",
+                notification_overrides = excluded.notification_overrides,
+                last_scanned_at = excluded.last_scanned_at",
             params![
                 project.id.to_string(),
                 project.name,
@@ -337,6 +456,27 @@ impl Store {
                 project.added_at.to_rfc3339(),
                 project.last_scanned_at.map(|t| t.to_rfc3339()),
             ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn do_remove_project(conn: &Connection, project_id: ProjectId) -> Result<()> {
+        conn.execute(
+            "DELETE FROM projects WHERE id = ?1",
+            params![project_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    fn do_clear_project_state(conn: &Connection, project_id: ProjectId) -> Result<()> {
+        conn.execute(
+            "DELETE FROM git_state WHERE project_id = ?1",
+            params![project_id.to_string()],
+        )?;
+        conn.execute(
+            "DELETE FROM deps WHERE project_id = ?1",
+            params![project_id.to_string()],
         )?;
         Ok(())
     }
@@ -377,11 +517,15 @@ impl Store {
 
     fn do_save_deps(conn: &Connection, project_id: ProjectId, deps: &[DepInfo]) -> Result<()> {
         let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM deps WHERE project_id = ?1",
+            params![project_id.to_string()],
+        )?;
         {
             let mut stmt = tx.prepare_cached(
-                "INSERT INTO deps (project_id, name, ecosystem, current_version, latest_version, update_available, severity, checked_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(project_id, name, ecosystem) DO UPDATE SET
+                "INSERT INTO deps (project_id, name, ecosystem, current_version, latest_version, update_available, severity, checked_at, dev_dependency, manifest_name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(project_id, name, ecosystem, dev_dependency, manifest_name) DO UPDATE SET
                     current_version = excluded.current_version,
                     latest_version = excluded.latest_version,
                     update_available = excluded.update_available,
@@ -399,18 +543,14 @@ impl Store {
                     dep.update_available as i32,
                     dep.severity.to_string(),
                     dep.checked_at.to_rfc3339(),
+                    dep.dev_dependency as i32,
+                    dep.manifest_name.as_deref().unwrap_or(""),
                 ])?;
             }
         }
         tx.commit()?;
         debug!("Saved {} deps for project {}", deps.len(), project_id);
         Ok(())
-    }
-}
-
-impl Drop for Store {
-    fn drop(&mut self) {
-        let _ = self.cmd_tx.send(DbCommand::Shutdown);
     }
 }
 

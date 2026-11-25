@@ -1,9 +1,9 @@
 Package: appchecker
-Version: 0.1.0-1
+Version: 0.2.0-1
 Section: devel
 Priority: optional
 Architecture: amd64
-Installed-Size: 7100
+Installed-Size: 7502
 Depends: git, libdbus-1-3
 Maintainer: ronylicha <ronylicha@users.noreply.github.com>
 Description: Native Linux TUI for monitoring multiple git repositories

@@ -35,6 +35,8 @@ fn test_npm_parser_detects_dependencies_and_dev_dependencies() {
         .find(|d| d.name == "typescript")
         .expect("typescript not found");
     assert_eq!(typescript.current_version, "5.3.0");
+    assert!(typescript.dev_dependency);
+    assert!(!express.dev_dependency);
 }
 
 #[test]
@@ -63,6 +65,8 @@ fn test_cargo_parser_detects_dependencies_and_dev_dependencies() {
         .find(|d| d.name == "criterion")
         .expect("criterion not found");
     assert_eq!(criterion.current_version, "0.5");
+    assert!(criterion.dev_dependency);
+    assert!(!serde.dev_dependency);
 }
 
 #[test]
@@ -119,7 +123,7 @@ fn test_pip_parser_detects_pyproject_toml_dependencies() {
         .iter()
         .find(|d| d.name == "pydantic")
         .expect("pydantic not found");
-    assert_eq!(pydantic.current_version, "2.5");
+    assert_eq!(pydantic.current_version, ">=2.5,<3.0");
 }
 
 #[test]
@@ -148,6 +152,13 @@ fn test_composer_parser_skips_php_and_ext_requirements() {
         .find(|d| d.name == "guzzlehttp/guzzle")
         .expect("guzzle not found");
     assert_eq!(guzzle.current_version, "7.8");
+
+    let phpunit = deps
+        .iter()
+        .find(|d| d.name == "phpunit/phpunit")
+        .expect("phpunit not found");
+    assert!(phpunit.dev_dependency);
+    assert!(!laravel.dev_dependency);
 
     // Verify php and ext-json are NOT included
     assert!(
@@ -186,6 +197,8 @@ fn test_gem_parser_detects_gems_and_skips_source_group_lines() {
         .find(|d| d.name == "rubocop")
         .expect("rubocop not found");
     assert_eq!(rubocop.current_version, "1.60");
+    assert!(rubocop.dev_dependency);
+    assert!(!rails.dev_dependency);
 }
 
 #[test]
@@ -197,4 +210,55 @@ fn test_empty_directory_returns_no_deps() {
     assert_eq!(deps.len(), 0, "Empty dir should return 0 deps");
 
     std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
+fn malformed_manifests_return_errors_instead_of_silent_empty_dependencies() {
+    let root = std::env::temp_dir().join(format!("appchecker-malformed-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("package.json"), "{not json").unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[dependencies\nserde = \"1.0\"").unwrap();
+
+    let report = appchecker::deps::DepsParser::detect_and_report(&root);
+
+    assert!(report.dependencies.is_empty());
+    assert_eq!(report.errors.len(), 2);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.manifest.ends_with("package.json"))
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.manifest.ends_with("Cargo.toml"))
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn compound_python_and_gem_constraints_remain_uncomparable_ranges() {
+    let root = std::env::temp_dir().join(format!("appchecker-ranges-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("requirements.txt"),
+        "requests>=2.20.0,<2.30.0\nrich[color]>=13.0.0; python_version >= '3.11'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Gemfile"),
+        "gem \"rails\", \">= 7.0\", \"< 8.0\"\n",
+    )
+    .unwrap();
+    let dependencies = appchecker::deps::DepsParser::detect_and_parse(&root);
+    assert_eq!(dependencies.len(), 3);
+    assert!(
+        dependencies.iter().all(|dependency| {
+            !appchecker::deps::RegistryClient::is_comparable(&dependency.current_version)
+        }),
+        "compound constraints were truncated: {dependencies:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
 }

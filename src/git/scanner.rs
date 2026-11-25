@@ -1,7 +1,6 @@
 use crate::core::{AppError, GitState, Result};
 use chrono::Utc;
 use std::path::Path;
-use tracing::{debug, warn};
 
 /// Scans a git repository and returns its current state.
 /// Designed to be called via `tokio::task::spawn_blocking` to avoid blocking the async runtime.
@@ -27,7 +26,7 @@ impl GitScanner {
             .and_then(|h| h.referent_name().map(|n| n.shorten().to_string()));
 
         // Full dirty check using index vs workdir comparison
-        let (is_dirty, staged_count, untracked_count) = Self::check_working_tree(&repo);
+        let (is_dirty, staged_count, untracked_count) = Self::check_working_tree(&repo)?;
 
         // Check ahead/behind against upstream tracking branch via git CLI
         let (ahead, behind) = Self::check_ahead_behind(path);
@@ -50,81 +49,53 @@ impl GitScanner {
         })
     }
 
-    /// Full working tree status check using gix index iteration.
+    /// Full working tree status using Git's staged and untracked file reporting.
     /// Returns (is_dirty, staged_count, untracked_count).
-    fn check_working_tree(repo: &gix::Repository) -> (bool, u32, u32) {
-        let mut is_dirty = false;
-        let mut staged_count: u32 = 0;
-        let mut untracked_count: u32 = 0;
-
-        let index = match repo.index_or_empty() {
-            Ok(idx) => idx,
-            Err(e) => {
-                warn!("Failed to read index: {}", e);
-                return (false, 0, 0);
-            }
+    fn check_working_tree(repo: &gix::Repository) -> Result<(bool, u32, u32)> {
+        let Some(work_dir) = repo.work_dir() else {
+            return Err(AppError::Git("Cannot inspect working tree".into()));
         };
+        let output = std::process::Command::new("git")
+            .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+            .current_dir(work_dir)
+            .output()
+            .map_err(|error| AppError::Git(format!("Cannot run git status: {error}")))?;
+        if !output.status.success() {
+            return Err(AppError::Git(format!(
+                "Git status failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
 
-        // Build set of indexed paths for untracked detection
-        let indexed_paths: std::collections::HashSet<String> = index
-            .entries()
-            .iter()
-            .filter_map(|e| {
-                std::str::from_utf8(&e.path(&index))
-                    .ok()
-                    .map(|s| s.to_string())
-            })
-            .collect();
-
-        // Iterate through index entries to detect staged changes
-        for entry in index.entries() {
-            let entry_path = match std::str::from_utf8(&entry.path(&index)) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
-            let full_path = match repo.work_dir() {
-                Some(wd) => wd.join(entry_path),
-                None => continue,
-            };
-
-            if !full_path.exists() {
-                staged_count += 1;
+        let mut is_dirty = false;
+        let mut staged_count = 0;
+        let mut untracked_count = 0;
+        let mut entries = output.stdout.split(|byte| *byte == 0);
+        while let Some(entry) = entries.next() {
+            if entry.len() < 3 || entry[2] != b' ' {
+                continue;
+            }
+            let index_status = entry[0];
+            let worktree_status = entry[1];
+            if matches!(index_status, b'R' | b'C') || matches!(worktree_status, b'R' | b'C') {
+                let _ = entries.next();
+            }
+            if index_status == b'?' && worktree_status == b'?' {
+                untracked_count += 1;
                 is_dirty = true;
-            } else if let Ok(metadata) = full_path.metadata() {
-                let index_size = entry.stat.size;
-                if metadata.len() != index_size as u64 {
-                    staged_count += 1;
-                    is_dirty = true;
-                }
+                continue;
+            }
+            if index_status == b'!' && worktree_status == b'!' {
+                continue;
+            }
+            if index_status != b' ' || worktree_status != b' ' {
+                is_dirty = true;
+            }
+            if index_status != b' ' {
+                staged_count += 1;
             }
         }
-
-        // Check for untracked files at top level
-        if let Some(work_dir) = repo.work_dir() {
-            if let Ok(entries) = std::fs::read_dir(work_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let name = entry.file_name();
-                    let name_str = name.to_string_lossy();
-
-                    if name_str.starts_with('.')
-                        || name_str == "node_modules"
-                        || name_str == "target"
-                    {
-                        continue;
-                    }
-
-                    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                        if !indexed_paths.contains(name_str.as_ref()) {
-                            untracked_count += 1;
-                            is_dirty = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        (is_dirty, staged_count, untracked_count)
+        Ok((is_dirty, staged_count, untracked_count))
     }
 
     /// Calculate ahead/behind counts using git CLI (stable across all git versions).

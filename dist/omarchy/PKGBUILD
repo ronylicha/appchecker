@@ -1,6 +1,6 @@
 # Maintainer: ronylicha <ronylicha@users.noreply.github.com>
 pkgname=appchecker
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health"
 arch=('x86_64')
@@ -28,7 +28,7 @@ package() {
     install -Dm755 target/release/appchecker "$pkgdir/usr/bin/appchecker"
 
     # Desktop entry
-    install -Dm644 dist/deb/appchecker_0.1.0-1_amd64/usr/share/applications/io.github.ronylicha.appchecker.desktop \
+    install -Dm644 dist/deb/appchecker_0.2.0-1_amd64/usr/share/applications/io.github.ronylicha.appchecker.desktop \
         "$pkgdir/usr/share/applications/io.github.ronylicha.appchecker.desktop"
 
     # Icons

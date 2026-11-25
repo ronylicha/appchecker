@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub struct NotificationRouter {
     config: AppConfig,
     pending: Mutex<Vec<Notification>>,
-    sent_ids: Mutex<HashMap<Uuid, AlertState>>,
+    sent_ids: Mutex<HashMap<(ProjectId, String, String), AlertState>>,
 }
 
 impl NotificationRouter {
@@ -45,6 +45,23 @@ impl NotificationRouter {
                 "Severity {:?} below threshold for project {:?}",
                 severity, project_id
             );
+            return;
+        }
+        match severity {
+            UpdateSeverity::Minor if !prefs.show_minor_updates => return,
+            UpdateSeverity::Major if !prefs.show_major_updates => return,
+            UpdateSeverity::Security if !prefs.show_security => return,
+            _ => {}
+        }
+        if self.pending.lock().unwrap().iter().any(|notification| {
+            notification.project_id == project_id
+                && notification.title == title
+                && notification.body == body
+        }) || self.sent_ids.lock().unwrap().contains_key(&(
+            project_id,
+            title.clone(),
+            body.clone(),
+        )) {
             return;
         }
 
@@ -103,14 +120,17 @@ impl NotificationRouter {
         // Batch low-severity into digest
         let (high_priority, low_priority): (Vec<_>, Vec<_>) = to_send
             .into_iter()
-            .partition(|n| n.severity >= UpdateSeverity::Major);
+            .partition(|n| n.severity == UpdateSeverity::Security);
 
         // Send high-priority individually
         for notif in &high_priority {
             if let Err(e) = self.send_dbus(notif) {
                 warn!("Failed to send notification '{}': {}", notif.title, e);
             } else {
-                sent_ids.insert(notif.id, AlertState::Active);
+                sent_ids.insert(
+                    (notif.project_id, notif.title.clone(), notif.body.clone()),
+                    AlertState::Active,
+                );
                 info!("Sent notification: {} ({:?})", notif.title, notif.severity);
             }
         }
@@ -147,6 +167,16 @@ impl NotificationRouter {
             if let Err(e) = self.send_dbus(&digest_notif) {
                 warn!("Failed to send digest notification: {}", e);
             } else {
+                for notification in &low_priority {
+                    sent_ids.insert(
+                        (
+                            notification.project_id,
+                            notification.title.clone(),
+                            notification.body.clone(),
+                        ),
+                        AlertState::Active,
+                    );
+                }
                 info!("Sent digest with {} updates", low_priority.len());
             }
         }
@@ -226,5 +256,53 @@ impl NotificationRouter {
             .and_then(|p| p.notification_overrides.as_ref())
             .map(|o| o.batch_interval_secs)
             .unwrap_or(self.config.global_notification_prefs.batch_interval_secs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Project;
+
+    #[test]
+    fn queue_honors_visibility_preferences_and_deduplicates_updates() {
+        let project = Project::new("demo".into(), std::path::PathBuf::from("/tmp/demo"));
+        let config = AppConfig {
+            projects: vec![project.clone()],
+            ..AppConfig::default()
+        };
+        let router = NotificationRouter::new(config);
+        let title = "serde update available".to_string();
+        let body = "serde 1.0.0 → 2.0.0".to_string();
+
+        router.queue(
+            project.id,
+            UpdateSeverity::Minor,
+            title.clone(),
+            body.clone(),
+        );
+        assert!(router.pending.lock().unwrap().is_empty());
+        router.queue(
+            project.id,
+            UpdateSeverity::Major,
+            title.clone(),
+            body.clone(),
+        );
+        router.queue(
+            project.id,
+            UpdateSeverity::Major,
+            title.clone(),
+            body.clone(),
+        );
+        assert_eq!(router.pending.lock().unwrap().len(), 1);
+
+        let key = (project.id, title.clone(), body.clone());
+        router
+            .sent_ids
+            .lock()
+            .unwrap()
+            .insert(key, AlertState::Active);
+        router.queue(project.id, UpdateSeverity::Major, title, body);
+        assert_eq!(router.pending.lock().unwrap().len(), 1);
     }
 }

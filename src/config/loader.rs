@@ -1,4 +1,5 @@
 use crate::core::{AppConfig, AppError, Result};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
@@ -41,16 +42,29 @@ impl ConfigLoader {
 
     /// Save config to the given path, creating parent directories if needed.
     pub fn save(config: &AppConfig, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             std::fs::create_dir_all(parent)
                 .map_err(|e| AppError::Config(format!("Failed to create config dir: {}", e)))?;
         }
 
         let content = toml::to_string_pretty(config)
             .map_err(|e| AppError::Config(format!("Failed to serialize config: {}", e)))?;
-
-        std::fs::write(path, content)
+        let temporary = path.with_extension(format!("toml-{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&temporary, content)
             .map_err(|e| AppError::Config(format!("Failed to write config: {}", e)))?;
+        if path.exists() {
+            let permissions = std::fs::metadata(path)
+                .map_err(|e| AppError::Config(format!("Failed to read config permissions: {}", e)))?
+                .permissions();
+            std::fs::set_permissions(&temporary, permissions).map_err(|e| {
+                AppError::Config(format!("Failed to preserve config permissions: {}", e))
+            })?;
+        }
+        std::fs::rename(&temporary, path)
+            .map_err(|e| AppError::Config(format!("Failed to replace config: {}", e)))?;
 
         info!("Saved config to {:?}", path);
         Ok(())
@@ -62,15 +76,47 @@ impl ConfigLoader {
         max_depth: usize,
         existing_paths: &[PathBuf],
     ) -> Vec<PathBuf> {
+        Self::auto_discover_with_cancel(
+            search_paths,
+            max_depth,
+            existing_paths,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+    }
+
+    pub fn auto_discover_with_cancel(
+        search_paths: &[PathBuf],
+        max_depth: usize,
+        existing_paths: &[PathBuf],
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Vec<PathBuf> {
         let mut discovered = Vec::new();
+        let existing: HashSet<PathBuf> = existing_paths
+            .iter()
+            .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.clone()))
+            .collect();
+        let mut seen = HashSet::new();
 
         for search_path in search_paths {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            let expanded = if search_path == Path::new("~") {
+                dirs::home_dir().unwrap_or_else(|| search_path.clone())
+            } else if search_path.starts_with("~/") {
+                dirs::home_dir()
+                    .map(|home| home.join(search_path.strip_prefix("~/").unwrap()))
+                    .unwrap_or_else(|| search_path.clone())
+            } else {
+                search_path.clone()
+            };
+            let search_path = std::fs::canonicalize(&expanded).unwrap_or(expanded);
             if !search_path.exists() {
                 debug!("Auto-discover path does not exist: {:?}", search_path);
                 continue;
             }
 
-            let walker = walkdir::WalkDir::new(search_path)
+            let walker = walkdir::WalkDir::new(&search_path)
                 .max_depth(max_depth)
                 .follow_links(false)
                 .into_iter()
@@ -88,9 +134,15 @@ impl ConfigLoader {
                 });
 
             for entry in walker.filter_map(|e| e.ok()) {
-                if entry.file_type().is_dir() && entry.file_name() == ".git" {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                if (entry.file_type().is_dir() || entry.file_type().is_file())
+                    && entry.file_name() == ".git"
+                {
                     let project_dir = entry.path().parent().unwrap().to_path_buf();
-                    if !existing_paths.contains(&project_dir) {
+                    let project_dir = std::fs::canonicalize(&project_dir).unwrap_or(project_dir);
+                    if !existing.contains(&project_dir) && seen.insert(project_dir.clone()) {
                         discovered.push(project_dir);
                     }
                 }

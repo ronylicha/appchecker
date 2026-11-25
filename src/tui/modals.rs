@@ -1,703 +1,511 @@
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use super::state::{ConfigForm, ProjectForm};
+use super::theme;
+use super::ui::UiRegions;
+use crate::core::ProjectId;
+use crate::deps::UpdatePlan;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use std::path::PathBuf;
 
-/// Modal dialog types for visual project management
 #[derive(Debug, Clone)]
 pub enum Modal {
     AddProject {
-        path_input: String,
-        name_input: String,
-        tags_input: String,
-        pin: bool,
-        cursor_field: usize, // 0=path, 1=name, 2=tags
+        form: ProjectForm,
+        error: Option<String>,
     },
-    RemoveConfirm {
-        project_name: String,
+    EditProject {
+        project_id: ProjectId,
+        form: ProjectForm,
+        error: Option<String>,
     },
-    DiscoverResults {
+    RemoveProject {
+        project_id: ProjectId,
+        name: String,
+    },
+    Discover {
         paths: Vec<PathBuf>,
         selected: usize,
     },
-    ConfigEditor {
-        scan_interval: String,
-        max_concurrent: String,
-        air_gap: bool,
-        cursor_field: usize,
+    ConfirmUpdates {
+        project_id: ProjectId,
+        plans: Vec<UpdatePlan>,
+        selected: usize,
+    },
+    Config {
+        form: ConfigForm,
+        error: Option<String>,
     },
     Help,
-    ProjectDetail {
-        name: String,
-        branch: String,
-        dirty: bool,
-        ahead: u32,
-        behind: u32,
-        deps_total: u32,
-        deps_outdated: u32,
-        deps_security: u32,
-    },
 }
 
-impl Modal {
-    pub fn new_add_project() -> Self {
-        Modal::AddProject {
-            path_input: String::new(),
-            name_input: String::new(),
-            tags_input: String::new(),
-            pin: false,
-            cursor_field: 0,
-        }
-    }
-
-    pub fn new_remove_confirm(name: String) -> Self {
-        Modal::RemoveConfirm { project_name: name }
-    }
-
-    pub fn new_discover(paths: Vec<PathBuf>) -> Self {
-        Modal::DiscoverResults { paths, selected: 0 }
-    }
-
-    pub fn new_config(interval: u64, concurrent: usize, air_gap: bool) -> Self {
-        Modal::ConfigEditor {
-            scan_interval: interval.to_string(),
-            max_concurrent: concurrent.to_string(),
-            air_gap,
-            cursor_field: 0,
-        }
-    }
-
-    pub fn new_help() -> Self {
-        Modal::Help
-    }
-
-    /// Handle key input within the modal, returns Some(result) when modal should close
-    pub fn handle_key(&mut self, key: KeyCode) -> Option<ModalResult> {
-        match self {
-            Modal::AddProject {
-                path_input,
-                name_input,
-                tags_input,
-                pin,
-                cursor_field,
-            } => match key {
-                KeyCode::Esc => Some(ModalResult::Cancelled),
-                KeyCode::Enter => {
-                    if !path_input.is_empty() {
-                        let path_clone = path_input.clone();
-                        Some(ModalResult::AddProject {
-                            path: PathBuf::from(path_clone.as_str()),
-                            name: if name_input.is_empty() {
-                                PathBuf::from(path_clone.as_str())
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "unnamed".into())
-                            } else {
-                                name_input.clone()
-                            },
-                            tags: tags_input
-                                .split(',')
-                                .map(|t| t.trim().to_string())
-                                .filter(|t| !t.is_empty())
-                                .collect(),
-                            pin: *pin,
-                        })
-                    } else {
-                        None // Don't close if path is empty
-                    }
-                }
-                KeyCode::Tab => {
-                    *cursor_field = (*cursor_field + 1) % 3;
-                    None
-                }
-                KeyCode::BackTab => {
-                    *cursor_field = if *cursor_field == 0 {
-                        2
-                    } else {
-                        *cursor_field - 1
-                    };
-                    None
-                }
-                KeyCode::Char(c) => {
-                    let field = match cursor_field {
-                        0 => path_input,
-                        1 => name_input,
-                        2 => tags_input,
-                        _ => path_input,
-                    };
-                    field.push(c);
-                    None
-                }
-                KeyCode::Backspace => {
-                    let field = match cursor_field {
-                        0 => path_input,
-                        1 => name_input,
-                        2 => tags_input,
-                        _ => path_input,
-                    };
-                    field.pop();
-                    None
-                }
-                _ => None,
-            },
-
-            Modal::RemoveConfirm { .. } => match key {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    Some(ModalResult::ConfirmRemove)
-                }
-                _ => Some(ModalResult::Cancelled),
-            },
-
-            Modal::DiscoverResults { paths, selected } => match key {
-                KeyCode::Esc => Some(ModalResult::Cancelled),
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if *selected > 0 {
-                        *selected -= 1;
-                    }
-                    None
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if *selected < paths.len().saturating_sub(1) {
-                        *selected += 1;
-                    }
-                    None
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    Some(ModalResult::SelectDiscovered(paths[*selected].clone()))
-                }
-                KeyCode::Char('a') => Some(ModalResult::SelectAllDiscovered(paths.clone())),
-                _ => None,
-            },
-
-            Modal::ConfigEditor {
-                scan_interval,
-                max_concurrent,
-                air_gap,
-                cursor_field,
-            } => match key {
-                KeyCode::Esc => Some(ModalResult::Cancelled),
-                KeyCode::Enter => Some(ModalResult::SaveConfig {
-                    scan_interval: scan_interval.parse().unwrap_or(300),
-                    max_concurrent: max_concurrent.parse().unwrap_or(8),
-                    air_gap: *air_gap,
-                }),
-                KeyCode::Tab => {
-                    *cursor_field = (*cursor_field + 1) % 3;
-                    None
-                }
-                KeyCode::Char(c) => match cursor_field {
-                    0 => {
-                        if c.is_ascii_digit() {
-                            scan_interval.push(c);
-                        }
-                        None
-                    }
-                    1 => {
-                        if c.is_ascii_digit() {
-                            max_concurrent.push(c);
-                        }
-                        None
-                    }
-                    2 => {
-                        *air_gap = !*air_gap;
-                        None
-                    }
-                    _ => None,
-                },
-                KeyCode::Backspace => match cursor_field {
-                    0 => {
-                        scan_interval.pop();
-                        None
-                    }
-                    1 => {
-                        max_concurrent.pop();
-                        None
-                    }
-                    _ => None,
-                },
-                _ => None,
-            },
-
-            Modal::Help => match key {
-                _ => Some(ModalResult::Cancelled),
-            },
-
-            Modal::ProjectDetail { .. } => match key {
-                _ => Some(ModalResult::Cancelled),
-            },
-        }
-    }
-}
-
-/// Result of a completed modal interaction
-#[derive(Debug, Clone)]
-pub enum ModalResult {
-    Cancelled,
-    AddProject {
-        path: PathBuf,
-        name: String,
-        tags: Vec<String>,
-        pin: bool,
-    },
-    ConfirmRemove,
-    SelectDiscovered(PathBuf),
-    SelectAllDiscovered(Vec<PathBuf>),
-    SaveConfig {
-        scan_interval: u64,
-        max_concurrent: usize,
-        air_gap: bool,
-    },
-}
-
-/// Draw a centered modal overlay on the frame
-pub fn draw_modal(frame: &mut Frame, modal: &Modal) {
-    let area = centered_rect(60, 70, frame.area());
-
-    // Clear background
+pub fn draw_modal(frame: &mut Frame, modal: &Modal, regions: &mut UiRegions) {
+    let area = centered_rect(82, 82, frame.area());
     frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(format!(" {} ", title(modal)))
+        .borders(Borders::ALL)
+        .border_style(theme::action());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     match modal {
-        Modal::AddProject {
-            path_input,
-            name_input,
-            tags_input,
-            pin,
-            cursor_field,
+        Modal::AddProject { form, error } | Modal::EditProject { form, error, .. } => {
+            draw_project_form(frame, form, error.as_deref(), inner, regions);
+        }
+        Modal::RemoveProject { name, .. } => {
+            draw_lines(
+                frame,
+                inner,
+                vec![
+                    Line::from("Stop monitoring this project?"),
+                    Line::from(""),
+                    Line::from(Span::styled(name.clone(), theme::title())),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Cached Git and dependency data will also be removed.",
+                        theme::muted(),
+                    )),
+                ],
+            );
+            buttons(frame, inner, "Remove", None, regions);
+        }
+        Modal::Discover { paths, selected } => {
+            let list_area = Rect {
+                height: inner.height.saturating_sub(4),
+                ..inner
+            };
+            if paths.is_empty() {
+                draw_lines(
+                    frame,
+                    list_area,
+                    vec![Line::from("No new Git repositories found.")],
+                );
+                buttons(frame, inner, "Close", None, regions);
+            } else {
+                let visible = list_area.height.max(1) as usize;
+                let start = selected.saturating_sub(visible.saturating_sub(1));
+                let lines: Vec<Line> = paths
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .take(visible)
+                    .map(|(index, path)| {
+                        Line::from(Span::styled(
+                            format!(
+                                "{} {}",
+                                marker(index == *selected),
+                                ellipsize_start(
+                                    &path.display().to_string(),
+                                    list_area.width.saturating_sub(2) as usize,
+                                )
+                            ),
+                            row_style(index == *selected),
+                        ))
+                    })
+                    .collect();
+                draw_lines_truncated(frame, list_area, lines);
+                regions.modal_rows = paths
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .take(visible)
+                    .map(|(index, _)| {
+                        (
+                            index,
+                            Rect {
+                                x: list_area.x,
+                                y: list_area.y + (index - start) as u16,
+                                width: list_area.width,
+                                height: 1,
+                            },
+                        )
+                    })
+                    .collect();
+                buttons(frame, inner, "Add all", Some("Add selected"), regions);
+            }
+        }
+        Modal::ConfirmUpdates {
+            plans, selected, ..
         } => {
-            let block = Block::default()
-                .title(" Add Project ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let fields = vec![
-                Line::from(vec![
-                    Span::styled(
-                        " Path:   ",
-                        Style::default()
-                            .fg(if *cursor_field == 0 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
+            let list_area = Rect {
+                height: inner.height.saturating_sub(6),
+                ..inner
+            };
+            let visible = (list_area.height.saturating_sub(1) / 2).max(1) as usize;
+            let start = selected.saturating_sub(visible.saturating_sub(1));
+            let mut lines = vec![Line::from(Span::styled(
+                "Review every operation before running them:",
+                theme::muted(),
+            ))];
+            for (index, plan) in plans.iter().enumerate().skip(start).take(visible) {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "{} {} {} -> {}",
+                        marker(index == *selected),
+                        plan.package,
+                        plan.current_version,
+                        plan.target_version
                     ),
-                    Span::styled(
-                        path_input.as_str(),
-                        Style::default().fg(if *cursor_field == 0 {
-                            Color::Green
-                        } else {
-                            Color::White
-                        }),
-                    ),
-                    if *cursor_field == 0 {
-                        Span::styled("█", Style::default().fg(Color::Yellow))
+                    row_style(index == *selected),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", plan.command_line()),
+                    if index == *selected {
+                        theme::action()
                     } else {
-                        Span::raw("")
+                        theme::muted()
                     },
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        " Name:   ",
-                        Style::default()
-                            .fg(if *cursor_field == 1 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        name_input.as_str(),
-                        Style::default().fg(if *cursor_field == 1 {
-                            Color::Green
-                        } else {
-                            Color::White
-                        }),
-                    ),
-                    if *cursor_field == 1 {
-                        Span::styled("█", Style::default().fg(Color::Yellow))
-                    } else {
-                        Span::raw("")
-                    },
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        " Tags:   ",
-                        Style::default()
-                            .fg(if *cursor_field == 2 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        tags_input.as_str(),
-                        Style::default().fg(if *cursor_field == 2 {
-                            Color::Green
-                        } else {
-                            Color::White
-                        }),
-                    ),
-                    if *cursor_field == 2 {
-                        Span::styled("█", Style::default().fg(Color::Yellow))
-                    } else {
-                        Span::raw("")
-                    },
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::raw(" Pin: "),
-                    Span::styled(
-                        if *pin { "[✓]" } else { "[ ]" },
-                        Style::default().fg(Color::Magenta),
-                    ),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled(
-                        "Tab",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(":next  "),
-                    Span::styled(
-                        "Enter",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(":confirm  "),
-                    Span::styled(
-                        "Esc",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(":cancel"),
-                ]),
-            ];
-
-            let paragraph = Paragraph::new(fields)
-                .block(block)
-                .alignment(Alignment::Left)
-                .wrap(Wrap { trim: false });
-            frame.render_widget(paragraph, area);
-        }
-
-        Modal::RemoveConfirm { project_name } => {
-            let block = Block::default()
-                .title(" Confirm Removal ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red));
-
-            let text = vec![
-                Line::from(""),
-                Line::from(vec![
-                    Span::raw("Remove project "),
-                    Span::styled(
-                        project_name.as_str(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("?"),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled(
-                        "Y",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("es / "),
-                    Span::styled(
-                        "N",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("o"),
-                ]),
-            ];
-
-            let paragraph = Paragraph::new(text)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
-        }
-
-        Modal::DiscoverResults { paths, selected } => {
-            let block = Block::default()
-                .title(format!(" Discovered Projects ({}) ", paths.len()))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green));
-
-            let items: Vec<Line> = paths
+                )));
+            }
+            draw_lines_truncated(frame, list_area, lines);
+            regions.modal_rows = plans
                 .iter()
                 .enumerate()
-                .take(area.height as usize - 4)
-                .map(|(i, p)| {
-                    let marker = if i == *selected { "▸ " } else { "  " };
-                    let style = if i == *selected {
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::White)
-                    };
-                    Line::from(Span::styled(format!("{}{}", marker, p.display()), style))
+                .skip(start)
+                .take(visible)
+                .map(|(index, _)| {
+                    let row = index - start;
+                    (
+                        index,
+                        Rect {
+                            x: list_area.x,
+                            y: list_area.y + 1 + (row * 2) as u16,
+                            width: list_area.width,
+                            height: 2,
+                        },
+                    )
                 })
                 .collect();
-
-            let mut lines = items;
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("j/k", Style::default().fg(Color::Yellow)),
-                Span::raw(":nav  "),
-                Span::styled("Enter", Style::default().fg(Color::Green)),
-                Span::raw(":select  "),
-                Span::styled("a", Style::default().fg(Color::Cyan)),
-                Span::raw(":all  "),
-                Span::styled("Esc", Style::default().fg(Color::Red)),
-                Span::raw(":cancel"),
-            ]));
-
-            let paragraph = Paragraph::new(lines).block(block);
-            frame.render_widget(paragraph, area);
+            if let Some(plan) = plans.get(*selected) {
+                let command_area = Rect {
+                    y: inner.y + inner.height.saturating_sub(4),
+                    height: 2,
+                    ..inner
+                };
+                draw_lines(
+                    frame,
+                    command_area,
+                    vec![Line::from(Span::styled(
+                        plan.command_line(),
+                        theme::action(),
+                    ))],
+                );
+            }
+            let confirm = format!("Run {} update(s)", plans.len());
+            buttons(frame, inner, &confirm, None, regions);
         }
-
-        Modal::ConfigEditor {
-            scan_interval,
-            max_concurrent,
-            air_gap,
-            cursor_field,
-        } => {
-            let block = Block::default()
-                .title(" Configuration ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let fields = vec![
-                Line::from(vec![
-                    Span::styled(
-                        " Scan interval (s): ",
-                        Style::default()
-                            .fg(if *cursor_field == 0 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        scan_interval.as_str(),
-                        Style::default().fg(if *cursor_field == 0 {
-                            Color::Green
-                        } else {
-                            Color::White
-                        }),
-                    ),
-                    if *cursor_field == 0 {
-                        Span::styled("█", Style::default().fg(Color::Yellow))
-                    } else {
-                        Span::raw("")
-                    },
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        " Max concurrent:    ",
-                        Style::default()
-                            .fg(if *cursor_field == 1 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        max_concurrent.as_str(),
-                        Style::default().fg(if *cursor_field == 1 {
-                            Color::Green
-                        } else {
-                            Color::White
-                        }),
-                    ),
-                    if *cursor_field == 1 {
-                        Span::styled("█", Style::default().fg(Color::Yellow))
-                    } else {
-                        Span::raw("")
-                    },
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        " Air-gap mode:      ",
-                        Style::default()
-                            .fg(if *cursor_field == 2 {
-                                Color::Yellow
-                            } else {
-                                Color::White
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        if *air_gap { "[✓] ON " } else { "[ ] OFF" },
-                        Style::default().fg(if *air_gap { Color::Red } else { Color::Green }),
-                    ),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw(":save  "),
-                    Span::styled("Esc", Style::default().fg(Color::Red)),
-                    Span::raw(":cancel"),
-                ]),
-            ];
-
-            let paragraph = Paragraph::new(fields).block(block);
-            frame.render_widget(paragraph, area);
+        Modal::Config { form, error } => {
+            draw_config_form(frame, form, error.as_deref(), inner, regions);
         }
-
         Modal::Help => {
-            let block = Block::default()
-                .title(" Keyboard Shortcuts ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let shortcuts = vec![
-                ("j / ↓", "Move down"),
-                ("k / ↑", "Move up"),
-                ("g / Home", "Go to top"),
-                ("G / End", "Go to bottom"),
-                ("Enter", "Project details"),
-                ("a", "Add project"),
-                ("d", "Delete project"),
-                ("f", "Find/discover projects"),
-                ("p", "Pin/unpin project"),
-                ("r", "Refresh scan"),
-                ("s", "Start daemon"),
-                ("x", "Stop daemon"),
-                ("t", "Toggle auto-refresh"),
-                ("c", "Configuration"),
-                ("? / h", "This help"),
-                ("q / Esc", "Quit"),
-            ];
-
-            let lines: Vec<Line> = shortcuts
-                .iter()
-                .map(|(key, desc)| {
-                    Line::from(vec![
-                        Span::styled(
-                            format!("{:<12}", key),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(*desc, Style::default().fg(Color::White)),
-                    ])
-                })
-                .collect();
-
-            let paragraph = Paragraph::new(lines).block(block);
-            frame.render_widget(paragraph, area);
-        }
-
-        Modal::ProjectDetail {
-            name,
-            branch,
-            dirty,
-            ahead,
-            behind,
-            deps_total,
-            deps_outdated,
-            deps_security,
-        } => {
-            let block = Block::default()
-                .title(format!(" {} ", name))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let dirty_str = if *dirty {
-                Span::styled(" YES ⚠", Style::default().fg(Color::Red))
-            } else {
-                Span::styled(" no", Style::default().fg(Color::Green))
-            };
-
-            let lines = vec![
-                Line::from(vec![
-                    Span::styled(" Branch:   ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(branch.as_str(), Style::default().fg(Color::Cyan)),
-                ]),
-                Line::from(vec![
-                    Span::styled(" Dirty:    ", Style::default().add_modifier(Modifier::BOLD)),
-                    dirty_str,
-                ]),
-                Line::from(vec![
-                    Span::styled(" Ahead:    ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(ahead.to_string(), Style::default().fg(Color::Green)),
-                ]),
-                Line::from(vec![
-                    Span::styled(" Behind:   ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(behind.to_string(), Style::default().fg(Color::Yellow)),
-                ]),
-                Line::from(""),
-                Line::from(vec![Span::styled(
-                    " Dependencies:",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]),
-                Line::from(vec![
-                    Span::raw("   Total:    "),
-                    Span::styled(deps_total.to_string(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(vec![
-                    Span::raw("   Outdated: "),
-                    Span::styled(
-                        deps_outdated.to_string(),
-                        Style::default().fg(if *deps_outdated > 0 {
-                            Color::Yellow
-                        } else {
-                            Color::Green
-                        }),
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::raw("   Security: "),
-                    Span::styled(
-                        deps_security.to_string(),
-                        Style::default().fg(if *deps_security > 0 {
-                            Color::Red
-                        } else {
-                            Color::Green
-                        }),
-                    ),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "Press any key to close",
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ];
-
-            let paragraph = Paragraph::new(lines).block(block);
-            frame.render_widget(paragraph, area);
+            draw_lines(
+                frame,
+                inner,
+                vec![
+                    Line::from(Span::styled("Navigation", theme::title())),
+                    Line::from("j/k or arrows: select    g/G: first/last"),
+                    Line::from("1/2/3: views             Enter: dependencies"),
+                    Line::from("Mouse: click rows, tabs and buttons; wheel: scroll"),
+                    Line::from(""),
+                    Line::from(Span::styled("Projects", theme::title())),
+                    Line::from("a: add    e: edit    d: remove    f: discover    p: pin"),
+                    Line::from(""),
+                    Line::from(Span::styled("Verification and updates", theme::title())),
+                    Line::from("r: refresh selected      R: refresh all"),
+                    Line::from("u: update selected       U: review all updates"),
+                    Line::from(""),
+                    Line::from("c: configuration    h/?: help    q: quit    Esc: close"),
+                ],
+            );
+            buttons(frame, inner, "Close", None, regions);
         }
     }
 }
 
-/// Calculate a centered rectangle area
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
+fn draw_project_form(
+    frame: &mut Frame,
+    form: &ProjectForm,
+    error: Option<&str>,
+    area: Rect,
+    regions: &mut UiRegions,
+) {
+    let values = [&form.path, &form.name, &form.tags];
+    let labels = ["Git path", "Name", "Tags (comma separated)"];
+    for (index, (label, value)) in labels.into_iter().zip(values).enumerate() {
+        let y = area.y + index as u16 * 2;
+        draw_lines_truncated(
+            frame,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
+            vec![Line::from(vec![
+                Span::styled(format!("{label:<24}"), label_style(form.field == index)),
+                Span::styled(
+                    ellipsize_start(
+                        &format!("{value}{}", cursor(form.field == index)),
+                        area.width.saturating_sub(24) as usize,
+                    ),
+                    theme::title(),
+                ),
+            ])],
+        );
+        regions.modal_fields.push((
+            index,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
+        ));
+    }
+    let pin_y = area.y + 6;
+    draw_lines(
+        frame,
+        Rect {
+            x: area.x,
+            y: pin_y,
+            width: area.width,
+            height: 1,
+        },
+        vec![Line::from(vec![
+            Span::styled(format!("{:<24}", "Pinned"), label_style(form.field == 3)),
+            Span::styled(
+                if form.pinned { "[x] yes" } else { "[ ] no" },
+                theme::title(),
+            ),
+        ])],
+    );
+    regions.modal_fields.push((
+        3,
+        Rect {
+            x: area.x,
+            y: pin_y,
+            width: area.width,
+            height: 1,
+        },
+    ));
+    draw_lines(
+        frame,
+        Rect {
+            x: area.x,
+            y: area.y + 8,
+            width: area.width,
+            height: 1,
+        },
+        vec![Line::from(Span::styled(
+            "Tab: next field    Space: toggle pin    Enter: save",
+            theme::muted(),
+        ))],
+    );
+    if let Some(error) = error {
+        draw_lines(
+            frame,
+            Rect {
+                x: area.x,
+                y: area.y + 9,
+                width: area.width,
+                height: 2,
+            },
+            vec![Line::from(Span::styled(
+                error.to_string(),
+                Style::default().fg(theme::ERROR),
+            ))],
+        );
+    }
+    buttons(frame, area, "Save project", None, regions);
+}
+
+fn draw_config_form(
+    frame: &mut Frame,
+    form: &ConfigForm,
+    error: Option<&str>,
+    area: Rect,
+    regions: &mut UiRegions,
+) {
+    let rows = [
+        ("Scan interval (seconds)", form.scan_interval.as_str()),
+        ("Concurrent registry checks", form.max_concurrent.as_str()),
+    ];
+    for (index, (label, value)) in rows.into_iter().enumerate() {
+        let y = area.y + index as u16 * 2;
+        draw_lines(
+            frame,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
+            vec![Line::from(vec![
+                Span::styled(format!("{label:<30}"), label_style(form.field == index)),
+                Span::styled(
+                    format!("{value}{}", cursor(form.field == index)),
+                    theme::title(),
+                ),
+            ])],
+        );
+        regions.modal_fields.push((
+            index,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
+        ));
+    }
+    let air_gap_y = area.y + 4;
+    draw_lines(
+        frame,
+        Rect {
+            x: area.x,
+            y: air_gap_y,
+            width: area.width,
+            height: 1,
+        },
+        vec![Line::from(vec![
+            Span::styled(
+                format!("{:<30}", "Air-gap (no registry calls)"),
+                label_style(form.field == 2),
+            ),
+            Span::styled(
+                if form.air_gap {
+                    "[x] enabled"
+                } else {
+                    "[ ] disabled"
+                },
+                theme::title(),
+            ),
+        ])],
+    );
+    regions.modal_fields.push((
+        2,
+        Rect {
+            x: area.x,
+            y: air_gap_y,
+            width: area.width,
+            height: 1,
+        },
+    ));
+    if let Some(error) = error {
+        draw_lines(
+            frame,
+            Rect {
+                x: area.x,
+                y: area.y + 7,
+                width: area.width,
+                height: 2,
+            },
+            vec![Line::from(Span::styled(
+                error.to_string(),
+                Style::default().fg(theme::ERROR),
+            ))],
+        );
+    }
+    buttons(frame, area, "Save configuration", None, regions);
+}
+
+fn buttons(
+    frame: &mut Frame,
+    area: Rect,
+    confirm: &str,
+    secondary: Option<&str>,
+    regions: &mut UiRegions,
+) {
+    let y = area.y + area.height.saturating_sub(2);
+    let confirm_area = Rect {
+        x: area.x,
+        y,
+        width: confirm.len() as u16 + 4,
+        height: 1,
+    };
+    let secondary_area = secondary.map(|label| Rect {
+        x: confirm_area.x + confirm_area.width + 2,
+        y,
+        width: label.len() as u16 + 4,
+        height: 1,
+    });
+    let cancel_label = "Cancel";
+    let cancel_x = secondary_area
+        .map(|secondary| secondary.x + secondary.width + 2)
+        .unwrap_or(confirm_area.x + confirm_area.width + 2);
+    let cancel_area = Rect {
+        x: cancel_x,
+        y,
+        width: cancel_label.len() as u16 + 4,
+        height: 1,
+    };
+    let mut spans = vec![Span::styled(format!("[ {confirm} ]"), theme::action())];
+    if let Some(label) = secondary {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(format!("[ {label} ]"), theme::action()));
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("[ Cancel ]", theme::muted()));
+    draw_lines(
+        frame,
+        Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        },
+        vec![Line::from(spans)],
+    );
+    regions.modal_confirm = Some(confirm_area);
+    regions.modal_secondary = secondary_area;
+    regions.modal_cancel = Some(cancel_area);
+}
+
+fn draw_lines(frame: &mut Frame, area: Rect, lines: Vec<Line>) {
+    frame.render_widget(
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn draw_lines_truncated(frame: &mut Frame, area: Rect, lines: Vec<Line>) {
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), area);
+}
+
+fn ellipsize_start(text: &str, width: usize) -> String {
+    if width == 0 || text.chars().count() <= width {
+        return text.to_string();
+    }
+    if width == 1 {
+        return "…".into();
+    }
+    let tail: String = text
+        .chars()
+        .rev()
+        .take(width - 1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("…{tail}")
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Percentage((100 - percent_y) / 2),
             Constraint::Percentage(percent_y),
             Constraint::Percentage((100 - percent_y) / 2),
         ])
-        .split(r);
-
+        .split(area);
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -705,5 +513,41 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage(percent_x),
             Constraint::Percentage((100 - percent_x) / 2),
         ])
-        .split(popup_layout[1])[1]
+        .split(vertical[1])[1]
+}
+
+fn title(modal: &Modal) -> String {
+    match modal {
+        Modal::AddProject { .. } => "Add project".into(),
+        Modal::EditProject { .. } => "Edit project".into(),
+        Modal::RemoveProject { .. } => "Confirm removal".into(),
+        Modal::Discover { paths, .. } => format!("Discovered repositories ({})", paths.len()),
+        Modal::ConfirmUpdates { .. } => "Confirm dependency updates".into(),
+        Modal::Config { .. } => "Configuration".into(),
+        Modal::Help => "Keyboard and mouse help".into(),
+    }
+}
+
+fn marker(selected: bool) -> &'static str {
+    if selected { ">" } else { " " }
+}
+
+fn row_style(selected: bool) -> Style {
+    if selected {
+        theme::selected()
+    } else {
+        Style::default().fg(theme::TEXT)
+    }
+}
+
+fn label_style(selected: bool) -> Style {
+    if selected {
+        theme::action()
+    } else {
+        theme::muted()
+    }
+}
+
+fn cursor(selected: bool) -> &'static str {
+    if selected { "_" } else { "" }
 }

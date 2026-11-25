@@ -5,6 +5,12 @@ use uuid::Uuid;
 /// Unique identifier for a monitored project
 pub type ProjectId = Uuid;
 
+pub const MAX_CONCURRENT_SCANS: usize = 256;
+
+pub fn bounded_concurrency(value: usize) -> usize {
+    value.clamp(1, MAX_CONCURRENT_SCANS)
+}
+
 /// A monitored local project directory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
@@ -58,6 +64,10 @@ pub struct DepInfo {
     pub latest_version: Option<String>,
     pub update_available: bool,
     pub severity: UpdateSeverity,
+    #[serde(default)]
+    pub dev_dependency: bool,
+    #[serde(default)]
+    pub manifest_name: Option<String>,
     pub checked_at: DateTime<Utc>,
 }
 
@@ -109,6 +119,7 @@ impl std::fmt::Display for UpdateSeverity {
 
 /// Per-project or global notification preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NotificationPrefs {
     pub enabled: bool,
     pub quiet_hours_start: Option<String>, // "HH:MM" format
@@ -158,6 +169,21 @@ pub struct Notification {
     pub acknowledged_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CheckResult {
+    pub project: String,
+    pub branch: Option<String>,
+    pub dirty: bool,
+    pub total_deps: usize,
+    pub outdated_deps: usize,
+    pub registry_errors: usize,
+    pub non_public_skipped: bool,
+    pub air_gap_mode: bool,
+    pub git_error: Option<String>,
+    pub registry_error_details: Vec<String>,
+    pub manifest_errors: Vec<String>,
+}
+
 /// Aggregate health status for a project (displayed in TUI dashboard)
 #[derive(Debug, Clone, Default)]
 pub struct ProjectHealth {
@@ -166,12 +192,13 @@ pub struct ProjectHealth {
     pub outdated_deps_count: u32,
     pub security_updates_count: u32,
     pub major_updates_count: u32,
-    pub last_scan_age_secs: Option<u64>,
+    pub last_scanned_at: Option<DateTime<Utc>>,
     pub scan_error: Option<String>,
 }
 
 /// Application-wide configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub projects: Vec<Project>,
     pub global_notification_prefs: NotificationPrefs,
@@ -206,6 +233,7 @@ impl Default for AppConfig {
 
 /// Configurable registry URLs for air-gap / corporate proxy support
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RegistryUrls {
     pub npm: String,
     pub crates_io: String,

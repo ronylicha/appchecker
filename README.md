@@ -1,86 +1,54 @@
-<div align="center">
-  <img src="assets/logo.svg" alt="AppChecker logo" width="160">
+# AppChecker
 
-  # AppChecker
+**Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health.**
 
-  **A native Linux command-line tool and terminal dashboard for monitoring local Git repositories and dependency updates.**
+AppChecker is a fast, local-first terminal dashboard that keeps track of all your development projects in one place. Monitor git status across dozens of repos, detect outdated dependencies across 6 ecosystems, and receive smart desktop notifications — all without leaving your terminal.
 
-  [![CI](https://github.com/ronylicha/appchecker/actions/workflows/ci.yml/badge.svg)](https://github.com/ronylicha/appchecker/actions/workflows/ci.yml)
-  [![Latest release](https://img.shields.io/github/v/release/ronylicha/appchecker)](https://github.com/ronylicha/appchecker/releases/latest)
-  [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-  [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
-</div>
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Language](https://img.shields.io/badge/language-Rust-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
 
-AppChecker is built for developers who maintain several projects at once. It centralizes Git status, discovers local repositories, checks dependency registries from its monitoring daemon, stores results in SQLite, and sends desktop notifications through D-Bus.
+## ✨ Features
 
-> **Status:** initial public release. AppChecker currently targets Linux. It checks dependency versions, not security vulnerabilities.
+- **Multi-repo dashboard** — Monitor up to 250 local git repositories with real-time status
+- **6 ecosystem support** — npm, Cargo, pip, Go modules, Composer, RubyGems
+- **Smart notifications** — Severity-based D-Bus alerts with quiet hours, batching, and per-project overrides
+- **Hybrid dependency checking** — Local manifest parsing + event-driven registry polling (not wasteful full scans)
+- **Reactive filesystem watching** — Debounced inotify events trigger instant rescans on changes
+- **Air-gap mode** — Full offline operation with configurable registry URLs for corporate environments
+- **Persistent cache** — SQLite-backed stale-while-revalidate for instant startup
+- **Auto-discovery** — Scan directories to find projects automatically
+- **Keyboard-driven TUI** — Fast navigation with vim-style bindings
+- **Visual modals** — Add/edit/remove projects, configure settings, view details — all within the TUI
 
-## Contents
+## 📦 Installation
 
-- [Features](#features)
-- [Supported ecosystems](#supported-ecosystems)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Commands](#commands)
-- [Terminal dashboard](#terminal-dashboard)
-- [Configuration](#configuration)
-- [Data and privacy](#data-and-privacy)
-- [Architecture](#architecture)
-- [Development](#development)
-- [Current limitations](#current-limitations)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Features
-
-- **Multi-repository overview:** branch, dirty state, ahead/behind counts, and stash presence.
-- **Project management:** add, remove, list, tag, filter, and pin projects.
-- **Automatic discovery:** find Git repositories below configurable directories, with a dry-run mode.
-- **Six package ecosystems:** parse local manifests and query their registries for newer versions.
-- **Background monitoring:** periodic scans plus debounced filesystem events for Git metadata and dependency manifests.
-- **Local persistence:** cache project, Git, and dependency state in SQLite.
-- **Desktop notifications:** D-Bus notifications with severity filtering, quiet hours, batching, and per-project overrides.
-- **Offline-friendly:** air-gap mode keeps local scans enabled while disabling registry requests.
-- **Scriptable output:** one-time local checks can emit JSON.
-
-## Supported ecosystems
-
-| Ecosystem | Manifest files read | Default registry |
-| --- | --- | --- |
-| npm | `package.json` (`dependencies`, `devDependencies`) | `registry.npmjs.org` |
-| Cargo | `Cargo.toml` (`dependencies`, `dev-dependencies`) | `crates.io` |
-| Go | `go.mod` (`require`) | `proxy.golang.org` |
-| pip | `pyproject.toml` (PEP 621) or `requirements.txt` | `pypi.org` |
-| Composer | `composer.json` (`require`, `require-dev`) | `repo.packagist.org` |
-| RubyGems | `Gemfile` | `rubygems.org` |
-
-The daemon compares manifest versions with the latest registry versions and classifies updates using semantic versioning. It does **not** currently query CVE databases or perform vulnerability audits.
-
-## Installation
-
-### AppImage (x86_64)
-
-Download `appchecker-0.1.0-x86_64.AppImage` from the [latest release](https://github.com/ronylicha/appchecker/releases/latest), then run:
+### From source (recommended)
 
 ```bash
-chmod +x appchecker-0.1.0-x86_64.AppImage
-./appchecker-0.1.0-x86_64.AppImage
+# Prerequisites: Rust 1.85+, git
+git clone https://github.com/ronylicha/appchecker.git
+cd appchecker
+cargo build --release --locked
+sudo cp target/release/appchecker /usr/local/bin/
 ```
 
-### Debian / Ubuntu (amd64)
-
-Download the `.deb` package from the [latest release](https://github.com/ronylicha/appchecker/releases/latest), then run:
+### Debian/Ubuntu (.deb)
 
 ```bash
-sudo apt install ./appchecker_0.1.0-1_amd64.deb
-appchecker --version
+wget https://github.com/ronylicha/appchecker/releases/download/v0.2.0/appchecker_0.2.0-1_amd64.deb
+sudo apt install ./appchecker_0.2.0-1_amd64.deb
 ```
 
-The package depends on Git and the D-Bus runtime library.
+### AppImage (portable, no install)
 
-### Arch Linux
+```bash
+wget https://github.com/ronylicha/appchecker/releases/download/v0.2.0/appchecker-0.2.0-x86_64.AppImage
+chmod +x appchecker-0.2.0-x86_64.AppImage
+./appchecker-0.2.0-x86_64.AppImage
+```
 
-A [`PKGBUILD`](dist/omarchy/PKGBUILD) is included:
+### Omarchy / Arch Linux (PKGBUILD)
 
 ```bash
 git clone https://github.com/ronylicha/appchecker.git
@@ -88,131 +56,77 @@ cd appchecker/dist/omarchy
 makepkg -si
 ```
 
-### Build from source
-
-Prerequisites:
-
-- Linux
-- [Rust](https://rustup.rs/) 1.85 or newer
-- Git
-- A D-Bus notification daemon for desktop notifications
+## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/ronylicha/appchecker.git
-cd appchecker
-cargo build --release --locked
-sudo install -Dm755 target/release/appchecker /usr/local/bin/appchecker
+# Launch the interactive TUI dashboard
+appchecker tui
+
+# Or add a project first
+appchecker add ~/Projects/my-app
+appchecker tui
+
+# One-time check without TUI
+appchecker check
+
+# Auto-discover projects in ~/Projects
+appchecker discover
+
+# Start background daemon with notifications (detaches and returns)
+appchecker daemon
+
+# Keep the daemon attached to the terminal for logs or debugging
+appchecker daemon --foreground
 ```
 
-For a user-local Cargo installation instead:
-
-```bash
-cargo install --path . --locked
-```
-
-Verify the installation:
-
-```bash
-appchecker --version
-# appchecker 0.1.0
-```
-
-Release downloads can be checked against `SHA256SUMS`:
-
-```bash
-sha256sum -c SHA256SUMS
-```
-
-## Quick start
-
-Add a project and inspect the configuration:
-
-```bash
-appchecker add ~/Projects/my-app --tags personal,rust --pin
-appchecker list --detailed
-appchecker config --path
-```
-
-Discover repositories without changing the configuration:
-
-```bash
-appchecker discover --paths ~/Projects --depth 3 --dry-run
-```
-
-Run the same discovery for real, then start the monitoring daemon:
-
-```bash
-appchecker discover --paths ~/Projects --depth 3
-appchecker daemon --foreground --interval 300
-```
-
-Open the dashboard in another terminal:
-
-```bash
-appchecker
-# Equivalent to: appchecker tui
-```
-
-The daemon must remain running to refresh registry data, persist scans, and send notifications. Stop it with `Ctrl+C`. Use your service manager if you want unattended background execution.
-
-## Commands
-
-Global options:
-
-```text
--c, --config <CONFIG>  Use a specific TOML configuration file
--v, --verbose          Enable debug logging for AppChecker
--h, --help             Show help
--V, --version          Show the version
-```
-
-| Command | Purpose |
-| --- | --- |
-| `appchecker add <PATH>` | Add a project; supports `--name`, `--tags a,b`, and `--pin`. |
-| `appchecker remove <NAME_OR_PATH>` | Stop monitoring a project. |
-| `appchecker list` | List monitored projects; supports `--detailed` and `--tag`. |
-| `appchecker check` | Run a local Git and manifest check; supports `--project` and `--format json`. |
-| `appchecker discover` | Find new Git repositories; supports `--paths`, `--depth`, and `--dry-run`. |
-| `appchecker daemon` | Monitor projects and query registries; supports `--foreground` and `--interval`. |
-| `appchecker config` | Print the effective configuration; supports `--path` and `--reset`. |
-| `appchecker tui` | Open the terminal dashboard. Running `appchecker` alone does the same. |
-
-`appchecker check` is a local snapshot: registry update checks are performed by the daemon, not by this command.
-
-Examples:
-
-```bash
-appchecker check --project my-app --format json
-appchecker list --tag rust --detailed
-appchecker --config ./config.toml daemon --foreground --interval 60
-```
-
-## Terminal dashboard
+## ⌨️ Keyboard Shortcuts
 
 | Key | Action |
-| --- | --- |
-| `j` / `k` or `Down` / `Up` | Select the next / previous project |
-| `g` / `G` or `Home` / `End` | Select the first / last project |
-| `p` | Toggle the selected project's pin for the current session |
-| `q` or `Esc` | Quit |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `g` / `Home` | Go to top |
+| `G` / `End` | Go to bottom |
+| `Enter` | Show project dependencies |
+| `a` | Add project |
+| `e` | Edit project |
+| `d` | Delete project |
+| `f` | Find/discover projects |
+| `p` | Pin/unpin project |
+| `r` | Refresh selected project |
+| `R` | Refresh all projects |
+| `u` | Update selected dependency |
+| `U` | Update all outdated dependencies |
+| `c` | Open configuration |
+| `1` / `2` / `3` | Switch view tab |
+| `?` / `h` | Show help |
+| `q` | Quit |
+| `Esc` | Close the modal or return to Projects |
+| `Ctrl+C` | Force quit |
 
-Indicators show dirty repositories (`*`), commits ahead (`↑N`) or behind (`↓N`), and outdated dependency counts. Project management is currently done through the CLI.
+## 🔔 Notification System
 
-## Configuration
+AppChecker uses a severity-tiered notification system to prevent alert fatigue:
 
-The default files are:
+| Severity | Behavior |
+|----------|----------|
+| **Security** | Immediate D-Bus notification, bypasses batching |
+| **Major** | Included in hourly digest |
+| **Minor** | Included in daily digest (if enabled) |
+| **Info** | Logged only, no notification |
 
-- Configuration: `~/.config/appchecker/config.toml`
-- Database: `~/.local/share/appchecker/appchecker.db`
+The `c` key edits scan interval, registry concurrency, and air-gap mode. Configure quiet hours, batch intervals, and per-project notification overrides directly in `~/.config/appchecker/config.toml`.
 
-Prefer `appchecker add` and `appchecker discover` to manage project entries. The generated TOML can also be edited directly. A complete configuration looks like this:
+## ⚙️ Configuration
+
+Config file: `~/.config/appchecker/config.toml`
 
 ```toml
 projects = []
-scan_interval_secs = 300
-max_concurrent_scans = 8
-air_gap_mode = false
-auto_discover_paths = ["/home/you/Projects"]
+scan_interval_secs = 300        # Auto-refresh interval
+max_concurrent_scans = 8        # Parallel scan workers (1-256)
+air_gap_mode = false            # Disable registry polling
+auto_discover_paths = ["~/Projects"]
 max_auto_discover_depth = 3
 file_descriptor_limit = 16384
 
@@ -222,9 +136,9 @@ quiet_hours_start = "22:00"
 quiet_hours_end = "08:00"
 min_severity = "minor"
 batch_interval_secs = 3600
-show_minor_updates = false
-show_major_updates = true
 show_security = true
+show_major_updates = true
+show_minor_updates = false
 
 [registry_urls]
 npm = "https://registry.npmjs.org"
@@ -235,96 +149,78 @@ packagist = "https://repo.packagist.org"
 rubygems = "https://rubygems.org/api/v1"
 ```
 
-Set `air_gap_mode = true` to disable all registry requests. Custom registry URLs can point to compatible mirrors or corporate proxies. Restart the daemon after editing its configuration.
+## Project management
 
-Useful commands:
+Add, list, and remove monitored repositories from the CLI:
 
 ```bash
-appchecker config          # Print effective TOML
-appchecker config --path   # Print only the configuration path
-appchecker config --reset  # Replace the configuration with defaults
+appchecker add ~/Projects/my-app --name "My app" --tags rust,cli --pin
+appchecker list --detailed
+appchecker remove my-app
 ```
+
+The same operations are available in the TUI: `a` adds, `e` edits, `d` removes, `f` discovers, and `p` pins a project. Tabs, project and dependency rows, forms, buttons, and dialogs are usable with the keyboard or the mouse. `j`/`k` and the wheel scroll; `g`/`G` jump to the first/last item. Long paths remain visible through left truncation.
+
+## Dependency checks and updates
+
+`appchecker check` queries configured registries unless air-gap mode is enabled. JSON output contains `project`, `branch`, `dirty`, `total_deps`, `outdated_deps`, `registry_errors`, `non_public_skipped`, `air_gap_mode`, `git_error`, `registry_error_details`, and `manifest_errors`. Logs go to stderr, leaving stdout machine-readable.
+
+In the TUI, select a dependency and press `u`, or press `U` to review all outdated dependencies for the selected project. Every operation is shown before confirmation and runs sequentially. The Activity view records sanitized, bounded output.
+
+| Ecosystem | Confirmed remediation |
+| --- | --- |
+| npm | `npm install <package>@<version>` with `--save-dev` when needed |
+| Cargo | `cargo add <package>@<version>` with `--dev` and aliases preserved |
+| Go | `go get <module>@v<version>` |
+| pip | Atomic update of `pyproject.toml` or `requirements.txt` |
+| Composer | `composer require <package>:<version> --with-all-dependencies --no-interaction` |
+| RubyGems | Update the `Gemfile` constraint, then `bundle update <package>` |
+
+Native update execution requires the corresponding package manager in `PATH`. Python updates edit and verify the manifest rather than changing the active virtual environment. Compound ranges that cannot be rewritten safely remain marked `RANGE` and are not offered as updates.
 
 ## Data and privacy
 
-AppChecker has no telemetry. Configuration and scan results stay on the local machine.
+AppChecker has no telemetry. Configuration and scan results stay local. Dependency names are sent only to configured registries when air-gap mode is disabled. Local paths, direct URLs, workspaces, private registries, and non-public sources are skipped and shown as `private/local`, never as fully up to date. The same distinction appears as `non_public_skipped` in JSON.
 
-When the daemon runs with `air_gap_mode = false`, it sends dependency names to the configured package registries to retrieve version metadata. Project names, local paths, and Git history are not intentionally sent to those registries. Git ahead/behind detection invokes the local `git` executable and does not fetch from a remote.
+Registry concurrency is limited to 1–256 checks. AppChecker respects project and user configuration for npm/Yarn, Cargo, Go, pip/uv, Composer, and Bundler, and fails closed when private-source configuration cannot be read safely.
 
-## Architecture
+## 🏗️ Architecture
 
-```text
+```
 src/
-├── cli/       # Clap command definitions
-├── config/    # TOML loading, saving, and repository discovery
-├── core/      # Configuration, project, dependency, and error models
-├── deps/      # Manifest parsers and asynchronous registry client
-├── git/       # Git repository scanning
-├── notify/    # Notification filtering, batching, and D-Bus delivery
-├── persist/   # SQLite migrations and threaded writes
-├── tui/       # Ratatui dashboard and terminal event handling
-└── watcher/   # Debounced filesystem monitoring
+├── core/       # Models (Project, GitState, DepInfo, AppConfig) + error types
+├── git/        # gix-based repo scanner with spawn_blocking async wrapper
+├── deps/       # 6-ecosystem manifest parser + hybrid registry client
+├── notify/     # Severity-tiered D-Bus notification router
+├── persist/    # Thread-safe SQLite store (mpsc channel writer thread)
+├── watcher/    # Debounced filesystem watcher (notify crate)
+├── config/     # TOML config loader + auto-discovery
+├── cli/        # Clap CLI commands
+├── tui/        # Ratatui dashboard, modals, state management, theming
+└── main.rs     # Entry point, command dispatch, daemon loop
 ```
 
-Runtime flow:
+Key design decisions:
+- **Rust + ratatui + gix + tokio** stack for performance and safety
+- **Thread-safe SQLite** via dedicated writer thread (Send+Sync for tokio::spawn)
+- **Event-driven deps checking** with bounded concurrency (Arc<Semaphore>)
+- **Stale-while-revalidate** caching for instant UI startup
+- **Git ahead/behind** via `git rev-list` CLI for cross-version compatibility
 
-```text
-CLI / filesystem events / periodic timer
-                 │
-                 ▼
-       Git scanner + manifest parsers
-                 │
-                 ▼
-        Registry client (unless air-gap)
-                 │
-          ┌──────┴──────┐
-          ▼             ▼
-     SQLite store   Notification router
-          │             │
-          ▼             ▼
-    Ratatui dashboard  D-Bus notifications
-```
-
-Main dependencies include Tokio, Ratatui, Crossterm, gix, rusqlite, reqwest with Rustls, notify, and Clap.
-
-## Development
-
-Clone and build:
+## 🧪 Testing
 
 ```bash
-git clone https://github.com/ronylicha/appchecker.git
-cd appchecker
-cargo build --locked
-```
-
-Run the standard checks:
-
-```bash
-cargo fmt --check
+cargo test --locked                 # All tests
+cargo test --test deps_parser_test  # Integration tests only
 cargo clippy --all-targets --all-features
-cargo test --locked
-cargo build --release --locked
 ```
 
-The integration tests cover all six dependency parsers and initialization of the SQLite store in a fresh data directory. CI runs the same checks on Ubuntu.
+Integration tests cover all 6 dependency parsers against fixture manifests in `tests/fixtures/`.
 
-## Current limitations
+## 📄 License
 
-- Only Linux is supported in this release; Windows and macOS are not packaged or verified.
-- The daemon runs in the foreground; no systemd user unit is installed yet.
-- The TUI is primarily an overview. Adding, removing, and discovering projects is done through the CLI.
-- `appchecker check` does not contact registries; run the daemon to populate update information.
-- Version checks are not a substitute for `cargo audit`, `npm audit`, osv-scanner, or another vulnerability scanner.
-- Prebuilt binaries are provided for x86_64/amd64 only.
+MIT — see [LICENSE](LICENSE).
 
-## Contributing
+## 🤝 Contributing
 
-Bug reports, feature requests, documentation improvements, and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-Please use [private vulnerability reporting](https://github.com/ronylicha/appchecker/security/advisories/new) for security issues instead of public issues; see [SECURITY.md](SECURITY.md).
-
-Changes are recorded in [CHANGELOG.md](CHANGELOG.md), and releases follow [Semantic Versioning](https://semver.org/).
-
-## License
-
-AppChecker is distributed under the [MIT License](LICENSE). Copyright (c) 2026 ronylicha.
+Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/ronylicha/appchecker).
