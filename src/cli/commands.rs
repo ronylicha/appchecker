@@ -105,6 +105,9 @@ pub enum Commands {
         path: bool,
     },
 
+    /// Launch the native desktop dashboard
+    Gui,
+
     /// Launch the interactive TUI dashboard
     Tui,
 }

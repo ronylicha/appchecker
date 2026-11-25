@@ -2,7 +2,12 @@
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
 
+export WGPU_BACKEND="${WGPU_BACKEND:-gl}"
+
 if [ "$#" -eq 0 ]; then
+    if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
+        exec "${HERE}/usr/bin/appchecker" gui
+    fi
     exec "${HERE}/usr/bin/appchecker" tui
 fi
 

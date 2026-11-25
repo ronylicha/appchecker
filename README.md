@@ -1,8 +1,8 @@
 # AppChecker
 
-**Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health.**
+**Native Linux desktop and terminal app for monitoring Git repositories and safely updating dependencies.**
 
-AppChecker is a fast, local-first terminal dashboard that keeps track of all your development projects in one place. Monitor git status across dozens of repos, detect outdated dependencies across 6 ecosystems, and receive smart desktop notifications — all without leaving your terminal.
+AppChecker keeps track of your development projects in one legible native interface. Monitor Git status, detect outdated dependencies across six ecosystems, review updates at the scope you choose, and optionally analyze breaking changes with Claude Code or Codex — without giving up control of your files. The existing terminal dashboard remains available for headless and SSH workflows.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Language](https://img.shields.io/badge/language-Rust-orange.svg)
@@ -10,7 +10,11 @@ AppChecker is a fast, local-first terminal dashboard that keeps track of all you
 
 ## ✨ Features
 
-- **Multi-repo dashboard** — Monitor up to 250 local git repositories with real-time status
+- **Native desktop interface** — Responsive light/dark UI, real buttons, accessible modals, mouse and keyboard navigation, and a native folder picker
+- **Real OSV vulnerability audit** — Virtualized dependency table with current/latest versions, update level, CVE/GHSA identifiers and severity for the exact installed version, plus explicit unavailable/not-checked states
+- **Scoped safe updates** — Update one dependency, one project, or every project with separate actions, clean-Git checks, per-project locks, external backups, cancellation, and conditional rollback
+- **Reviewed AI remediation** — Official Claude Code/Codex OAuth flows, explicit file consent, bounded redacted context, structured findings, reviewed diffs, dedicated branches, and post-update checks
+- **Multi-repo dashboard** — Add, edit, remove, pin, search, filter, and discover local Git repositories
 - **6 ecosystem support** — npm, Cargo, pip, Go modules, Composer, RubyGems
 - **Smart notifications** — Severity-based D-Bus alerts with quiet hours, batching, and per-project overrides
 - **Hybrid dependency checking** — Local manifest parsing + event-driven registry polling (not wasteful full scans)
@@ -26,7 +30,10 @@ AppChecker is a fast, local-first terminal dashboard that keeps track of all you
 ### From source (recommended)
 
 ```bash
-# Prerequisites: Rust 1.85+, git
+# Prerequisites: Rust 1.95+, Git, and a native Linux graphics stack
+# Debian/Ubuntu build dependencies:
+sudo apt install libdbus-1-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
+  libx11-dev libgl1-mesa-dev libegl1-mesa-dev
 git clone https://github.com/ronylicha/appchecker.git
 cd appchecker
 cargo build --release --locked
@@ -36,16 +43,16 @@ sudo cp target/release/appchecker /usr/local/bin/
 ### Debian/Ubuntu (.deb)
 
 ```bash
-wget https://github.com/ronylicha/appchecker/releases/download/v0.2.0/appchecker_0.2.0-1_amd64.deb
-sudo apt install ./appchecker_0.2.0-1_amd64.deb
+wget https://github.com/ronylicha/appchecker/releases/download/v0.3.0/appchecker_0.3.0-1_amd64.deb
+sudo apt install ./appchecker_0.3.0-1_amd64.deb
 ```
 
 ### AppImage (portable, no install)
 
 ```bash
-wget https://github.com/ronylicha/appchecker/releases/download/v0.2.0/appchecker-0.2.0-x86_64.AppImage
-chmod +x appchecker-0.2.0-x86_64.AppImage
-./appchecker-0.2.0-x86_64.AppImage
+wget https://github.com/ronylicha/appchecker/releases/download/v0.3.0/appchecker-0.3.0-x86_64.AppImage
+chmod +x appchecker-0.3.0-x86_64.AppImage
+./appchecker-0.3.0-x86_64.AppImage
 ```
 
 ### Omarchy / Arch Linux (PKGBUILD)
@@ -59,12 +66,16 @@ makepkg -si
 ## 🚀 Quick Start
 
 ```bash
-# Launch the interactive TUI dashboard
+# Launch the native desktop interface (also the default)
+appchecker
+appchecker gui
+
+# Or use the terminal dashboard
 appchecker tui
 
-# Or add a project first
+# Add a project first from the CLI if preferred
 appchecker add ~/Projects/my-app
-appchecker tui
+appchecker gui
 
 # One-time check without TUI
 appchecker check
@@ -79,7 +90,31 @@ appchecker daemon
 appchecker daemon --foreground
 ```
 
+## 🖥️ Native desktop workflows
+
+- **Projects**: add a repository through the native directory picker, edit its metadata, pin it, remove its cache, search by name/tag, or discover repositories automatically.
+- **Updates**: select a project, inspect current/latest versions and registry or manifest errors, filter to outdated packages, then update one dependency or the whole project. A separate global action reviews every project together.
+- **Confirmation**: every update lists the owning project, target version and exact operation. Execution rechecks the expected Git HEAD and a clean worktree, locks each project, revalidates every package, and stores manifest/lockfile backups outside the repository. Global updates continue after individual failures.
+- **Activity**: inspect sanitized session-only output, including cancellation, partial failures and recovery. No raw AI prompt, source context, patch, or provider token is persisted by default.
+- **Accessibility**: light and dark themes, keyboard focus, native modal dialogs, visible disabled/busy states, high-contrast text and controls, responsive cards, and virtualized long dependency/activity lists.
+
+The GUI uses the system graphics stack (Wayland or X11). The AppImage defaults to the OpenGL wgpu backend; set `WGPU_BACKEND` to override it. On a headless terminal, use `appchecker tui`.
+
+### Optional AI remediation
+
+Install the official `claude`, `codex` and/or `agy` executable, then choose **Connect with OAuth** in AI remediation. AppChecker opens `claude auth login`, `codex login`, or Antigravity's interactive sign-in in a real terminal and checks `claude auth status --text`, `codex login status`, or `agy models`. It never reads, displays, or stores provider tokens.
+
+Use the **Model** selector to choose the provider default or a model from the installed CLI: latest aliases reported by `claude --help`, the visible API catalog from `codex debug models`, or the full dynamic catalog from `agy models`. Antigravity additionally requires an explicit per-session acknowledgement: Google does not support third-party headless use on consumer plans; use a supported Enterprise/API route or accept responsibility for that run.
+
+Choose the exact source files, review the consent, and only then run analysis. Files are size-bounded, redacted and copied to a disposable directory. Air-gap mode disables provider calls. The provider can return structured findings and a patch but cannot execute commands. Authentication or subscription errors are shown verbatim; AppChecker never fabricates an analysis.
+
+Before applying a patch, review the complete diff. AppChecker rejects absolute paths, traversal, `.git`, symlinks, submodules and files outside the approved set. It verifies the expected HEAD, clean worktree and exact reviewed-diff hash, applies on a dedicated branch, and runs only ecosystem-specific checks that exist. Rollback is available only while the tree still exactly matches the applied patch; later edits are never overwritten with `reset --hard`.
+
 ## ⌨️ Keyboard Shortcuts
+
+Native GUI: `Ctrl+1` Projects, `Ctrl+2` Updates, `Ctrl+3` AI remediation, `Ctrl+4` Activity, `Ctrl+N` new project. `Tab`/`Shift+Tab` navigates controls and `Esc` closes the active modal.
+
+Terminal UI:
 
 | Key | Action |
 |-----|--------|
@@ -125,7 +160,8 @@ Config file: `~/.config/appchecker/config.toml`
 projects = []
 scan_interval_secs = 300        # Auto-refresh interval
 max_concurrent_scans = 8        # Parallel scan workers (1-256)
-air_gap_mode = false            # Disable registry polling
+air_gap_mode = false            # Disable registry polling and AI provider calls
+trusted_repositories = []       # Project UUIDs allowed to run lifecycle scripts
 auto_discover_paths = ["~/Projects"]
 max_auto_discover_depth = 3
 file_descriptor_limit = 16384
@@ -147,6 +183,7 @@ pypi = "https://pypi.org/pypi"
 go_proxy = "https://proxy.golang.org"
 packagist = "https://repo.packagist.org"
 rubygems = "https://rubygems.org/api/v1"
+osv = "https://api.osv.dev"
 ```
 
 ## Project management
@@ -169,11 +206,11 @@ In the TUI, select a dependency and press `u`, or press `U` to review all outdat
 
 | Ecosystem | Confirmed remediation |
 | --- | --- |
-| npm | `npm install <package>@<version>` with `--save-dev` when needed |
+| npm | `npm install <package>@<version> --ignore-scripts` with `--save-dev` when needed |
 | Cargo | `cargo add <package>@<version>` with `--dev` and aliases preserved |
 | Go | `go get <module>@v<version>` |
 | pip | Atomic update of `pyproject.toml` or `requirements.txt` |
-| Composer | `composer require <package>:<version> --with-all-dependencies --no-interaction` |
+| Composer | `composer require <package>:<version> --with-all-dependencies --no-interaction --no-scripts` |
 | RubyGems | Update the `Gemfile` constraint, then `bundle update <package>` |
 
 Native update execution requires the corresponding package manager in `PATH`. Python updates edit and verify the manifest rather than changing the active virtual environment. Compound ranges that cannot be rewritten safely remain marked `RANGE` and are not offered as updates.
@@ -183,6 +220,10 @@ Native update execution requires the corresponding package manager in `PATH`. Py
 AppChecker has no telemetry. Configuration and scan results stay local. Dependency names are sent only to configured registries when air-gap mode is disabled. Local paths, direct URLs, workspaces, private registries, and non-public sources are skipped and shown as `private/local`, never as fully up to date. The same distinction appears as `non_public_skipped` in JSON.
 
 Registry concurrency is limited to 1–256 checks. AppChecker respects project and user configuration for npm/Yarn, Cargo, Go, pip/uv, Composer, and Bundler, and fails closed when private-source configuration cannot be read safely.
+
+When air-gap mode is disabled, AppChecker sends public dependency names, ecosystems and exact installed versions to the configured registries and to OSV. “No known CVE” means OSV returned no entry for that exact version; it is not a guarantee that the package is safe. OSV failures remain visible as “CVE unavailable”. Air-gap mode makes no OSV request.
+
+AI providers receive only the files explicitly approved for one analysis. Secrets are redacted before provider invocation, and temporary analysis directories are deleted afterward. Provider authentication remains in the official CLI's own credential store. Reviewed patch backups live outside the repository with restrictive permissions.
 
 ## 🏗️ Architecture
 
@@ -197,11 +238,12 @@ src/
 ├── config/     # TOML config loader + auto-discovery
 ├── cli/        # Clap CLI commands
 ├── tui/        # Ratatui dashboard, modals, state management, theming
+├── desktop/    # Native eframe/egui app, rfd pickers, safe updates and AI review
 └── main.rs     # Entry point, command dispatch, daemon loop
 ```
 
 Key design decisions:
-- **Rust + ratatui + gix + tokio** stack for performance and safety
+- **Rust + eframe/egui + rfd** native desktop UI, with **ratatui + gix + tokio** retained for terminal and async workflows
 - **Thread-safe SQLite** via dedicated writer thread (Send+Sync for tokio::spawn)
 - **Event-driven deps checking** with bounded concurrency (Arc<Semaphore>)
 - **Stale-while-revalidate** caching for instant UI startup

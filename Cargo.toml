@@ -1,15 +1,15 @@
 [package]
 name = "appchecker"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["ronylicha <ronylicha@users.noreply.github.com>"]
-description = "Native Linux TUI for monitoring multiple git repositories, dependency updates, and project health"
+description = "Native Linux desktop and terminal app for monitoring Git repositories and safely updating dependencies"
 license = "MIT"
 repository = "https://github.com/ronylicha/appchecker"
 readme = "README.md"
-rust-version = "1.85"
-keywords = ["cli", "git", "tui", "dependencies", "monitoring"]
-categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.95"
+keywords = ["gui", "cli", "git", "dependencies", "monitoring"]
+categories = ["command-line-utilities", "development-tools", "gui"]
 
 [lib]
 name = "appchecker"
@@ -76,6 +76,10 @@ futures-util = "0.3"
 
 # Platform directories (config, data, home)
 dirs = "6"
+eframe = { version = "0.37.0", features = ["persistence"] }
+egui_extras = "0.37.0"
+rfd = "0.18.0"
+sha2 = "0.10"
 
 [profile.release]
 strip = true

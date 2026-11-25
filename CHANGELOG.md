@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-26
+
+### Added
+
+- Native `eframe/egui` desktop application with `appchecker gui`, now the default launch mode; `appchecker tui` remains available.
+- Full project management from the desktop: add, edit, remove, pin, search and discover repositories with a native `rfd` folder picker.
+- Distinct dependency, project and all-project update actions with review counts, grouped confirmations, disabled/busy states, cancellation and session Activity.
+- Clean-worktree and expected-HEAD checks, per-project locks, immediate plan revalidation, external manifest/lockfile backups and conditional rollback that preserves later edits.
+- Claude Code, Codex, and Antigravity OAuth launch/status integration using the official CLIs, with no token handling or simulated provider results.
+- Dynamic model selection from `claude --help`, `codex debug models`, and `agy models`, including an explicit Antigravity third-party usage acknowledgement.
+- Explicit per-project AI file consent, bounded redacted analysis directories, structured breaking-change findings, reviewed diffs, dedicated branches and ecosystem-specific post-patch checks.
+- Reviewed patch validation for exact hashes, file scope, unsafe paths, symlinks and submodules; rollback remains available after failed project checks and refuses later user edits.
+- Responsive light/dark themes, accessible contrast, keyboard navigation, true modal dialogs, native buttons, error banners, filters, file chips and virtualized dependency/activity lists.
+- Professional dependency table with a real OSV audit for exact installed versions, CVE/GHSA aliases, severity, explicit unavailable states, and no air-gap requests.
+- Automatic dependency and vulnerability scans at native startup, plus a horizontally scrollable table for narrow windows.
+- X11 and headless Wayland native-startup checks in CI, AppStream desktop metadata, OpenGL AppImage fallback and updated installation documentation.
+
+### Changed
+
+- npm and Composer updates suppress lifecycle scripts by default; repositories that require Bundler behavior need an explicit trusted-project opt-in.
+- Update failures aggregate per project instead of stopping unrelated projects, and recovery states distinguish success, cancellation and skipped work.
+- Application packaging now launches the native GUI with `Terminal=false` and retains the TUI as an explicit fallback.
+
+### Fixed
+
+- Prevent updates from overwriting uncommitted work or applying stale versions after a repository changes.
+- Keep primary and disabled buttons legible, make narrow-window global actions visible, and show Git, registry and manifest errors instead of hiding them.
+- Preserve rollback availability when post-patch checks fail and bound provider output without pipe deadlocks.
+- Clarify repository, display-name and tag inputs with visible labels, examples and an explicit lifecycle-script trust explanation.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
@@ -102,5 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create missing parent directories before opening the SQLite database, allowing the daemon to start with a fresh data directory.
 - Forward command-line arguments correctly through the AppImage launcher.
 
+[0.3.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.1.0

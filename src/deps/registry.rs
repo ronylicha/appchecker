@@ -28,6 +28,66 @@ pub struct BatchCheck {
     pub non_public_skipped: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum VulnerabilitySeverity {
+    Unknown,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl std::fmt::Display for VulnerabilitySeverity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Unknown => "Unknown",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Critical => "Critical",
+        };
+        formatter.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Vulnerability {
+    pub id: String,
+    pub aliases: Vec<String>,
+    pub severity: VulnerabilitySeverity,
+    pub summary: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OsvResponse {
+    #[serde(default)]
+    vulns: Vec<OsvVulnerability>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OsvVulnerability {
+    id: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    database_specific: Option<OsvDatabaseSpecific>,
+    #[serde(default)]
+    summary: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OsvDatabaseSpecific {
+    severity: Option<String>,
+}
+
+pub fn highest_vulnerability_severity(vulnerabilities: &[Vulnerability]) -> VulnerabilitySeverity {
+    vulnerabilities
+        .iter()
+        .map(|vulnerability| vulnerability.severity)
+        .max()
+        .unwrap_or(VulnerabilitySeverity::Unknown)
+}
+
 /// Hybrid registry client: checks local cache first, then polls registries event-driven.
 pub struct RegistryClient {
     client: Client,
@@ -278,6 +338,84 @@ impl RegistryClient {
 
     pub fn is_comparable(version: &str) -> bool {
         parse_loose_version(version).is_some()
+    }
+
+    pub async fn query_vulnerabilities(&self, dependency: &DepInfo) -> Result<Vec<Vulnerability>> {
+        if self.air_gap_mode {
+            return Err(AppError::Other(
+                "OSV vulnerability checks are disabled in air-gap mode".into(),
+            ));
+        }
+        if !is_public_dependency(dependency) {
+            return Err(AppError::Other(
+                "OSV audit is available only for public registry dependencies".into(),
+            ));
+        }
+        let ecosystem = match dependency.ecosystem {
+            Ecosystem::Npm => "npm",
+            Ecosystem::Cargo => "crates.io",
+            Ecosystem::Pip => "PyPI",
+            Ecosystem::Go => "Go",
+            Ecosystem::Composer => "Packagist",
+            Ecosystem::Gem => "RubyGems",
+        };
+        let response = self
+            .client
+            .post(format!("{}/v1/query", self.urls.osv.trim_end_matches('/')))
+            .json(&serde_json::json!({
+                "package": {
+                    "name": &dependency.name,
+                    "ecosystem": ecosystem,
+                },
+                "version": &dependency.current_version,
+            }))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<OsvResponse>()
+            .await?;
+        Ok(response
+            .vulns
+            .into_iter()
+            .map(|vulnerability| {
+                let severity = vulnerability
+                    .database_specific
+                    .and_then(|specific| specific.severity)
+                    .map(|severity| match severity.to_ascii_uppercase().as_str() {
+                        "CRITICAL" => VulnerabilitySeverity::Critical,
+                        "HIGH" => VulnerabilitySeverity::High,
+                        "MEDIUM" | "MODERATE" => VulnerabilitySeverity::Medium,
+                        "LOW" => VulnerabilitySeverity::Low,
+                        _ => VulnerabilitySeverity::Unknown,
+                    })
+                    .unwrap_or(VulnerabilitySeverity::Unknown);
+                Vulnerability {
+                    id: vulnerability.id,
+                    aliases: vulnerability.aliases,
+                    severity,
+                    summary: vulnerability.summary,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn query_vulnerability_batch(
+        &self,
+        dependencies: &[DepInfo],
+        max_concurrent: usize,
+    ) -> Vec<(String, Result<Vec<Vulnerability>>)> {
+        let semaphore = Arc::new(Semaphore::new(bounded_concurrency(max_concurrent)));
+        let checks = dependencies.iter().map(|dependency| {
+            let semaphore = semaphore.clone();
+            async move {
+                let _permit = semaphore.acquire().await.expect("OSV semaphore closed");
+                (
+                    dependency.name.clone(),
+                    self.query_vulnerabilities(dependency).await,
+                )
+            }
+        });
+        join_all(checks).await
     }
 
     pub fn is_newer(current: &str, latest: &str) -> bool {

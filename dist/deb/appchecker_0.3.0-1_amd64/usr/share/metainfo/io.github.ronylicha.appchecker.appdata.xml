@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ronylicha.appchecker</id>
+  <name>AppChecker</name>
+  <developer id="io.github.ronylicha">
+    <name>ronylicha</name>
+  </developer>
+  <summary>Monitor Git repositories and safely update project dependencies</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      AppChecker is a native Linux desktop and terminal application for monitoring
+      local Git repositories and dependency updates across npm, Cargo, Go, pip,
+      Composer, and RubyGems projects.
+    </p>
+    <p>
+      Review updates per dependency, per project, or across every project, with
+      clean-worktree checks, external backups, and explicit confirmations. Optional
+      Claude Code, Codex, and Antigravity integration analyzes breaking changes only after you
+      approve the exact files to share and review every proposed patch.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/ronylicha/appchecker</url>
+  <url type="bugtracker">https://github.com/ronylicha/appchecker/issues</url>
+  <launchable type="desktop-id">io.github.ronylicha.appchecker.desktop</launchable>
+  <provides>
+    <binary>appchecker</binary>
+  </provides>
+  <releases>
+    <release version="0.3.0" date="2026-11-26"/>
+    <release version="0.2.0" date="2026-11-25"/>
+    <release version="0.1.0" date="2026-11-25"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod core;
 pub mod deps;
+pub mod desktop;
 pub mod git;
 pub mod notify;
 pub mod persist;

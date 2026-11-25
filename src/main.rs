@@ -420,7 +420,14 @@ async fn async_main() -> anyhow::Result<()> {
             }
         }
 
-        Some(Commands::Tui) | None => {
+        Some(Commands::Gui) | None => {
+            let config = ConfigLoader::load(&config_path)?;
+            let store = Store::open(&ConfigLoader::default_db_path())?;
+            appchecker::desktop::run(config, config_path, store)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        }
+
+        Some(Commands::Tui) => {
             let config = ConfigLoader::load(&config_path)?;
             let db_path = ConfigLoader::default_db_path();
             let store = Store::open(&db_path)?;

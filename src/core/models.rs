@@ -205,6 +205,7 @@ pub struct AppConfig {
     pub scan_interval_secs: u64,
     pub max_concurrent_scans: usize,
     pub air_gap_mode: bool,
+    pub trusted_repositories: Vec<ProjectId>,
     pub registry_urls: RegistryUrls,
     pub auto_discover_paths: Vec<std::path::PathBuf>,
     pub max_auto_discover_depth: usize,
@@ -219,6 +220,7 @@ impl Default for AppConfig {
             scan_interval_secs: 300, // 5 minutes
             max_concurrent_scans: 8,
             air_gap_mode: false,
+            trusted_repositories: Vec::new(),
             registry_urls: RegistryUrls::default(),
             auto_discover_paths: vec![
                 dirs::home_dir()
@@ -241,6 +243,7 @@ pub struct RegistryUrls {
     pub go_proxy: String,
     pub packagist: String,
     pub rubygems: String,
+    pub osv: String,
 }
 
 impl Default for RegistryUrls {
@@ -252,6 +255,7 @@ impl Default for RegistryUrls {
             go_proxy: "https://proxy.golang.org".to_string(),
             packagist: "https://repo.packagist.org".to_string(),
             rubygems: "https://rubygems.org/api/v1".to_string(),
+            osv: "https://api.osv.dev".to_string(),
         }
     }
 }

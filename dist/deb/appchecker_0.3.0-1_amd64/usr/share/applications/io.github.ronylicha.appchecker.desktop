@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=AppChecker
+Comment=Monitor Git repositories and safely update project dependencies
+Exec=appchecker gui
+Icon=appchecker
+Terminal=false
+Type=Application
+Categories=Development;
+Keywords=git;dependencies;monitor;dashboard;gui;tui;
+StartupNotify=true

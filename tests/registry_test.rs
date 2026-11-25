@@ -178,3 +178,97 @@ async fn batch_checks_log_registry_failures_for_daemon_users() {
         "missing registry error in daemon logs: {output}"
     );
 }
+
+#[tokio::test]
+async fn osv_returns_cve_aliases_and_highest_severity() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buffer = [0_u8; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]);
+        assert!(request.contains("POST /v1/query"));
+        assert!(request.contains("\"ecosystem\":\"npm\""));
+        assert!(request.contains("\"name\":\"express\""));
+        assert!(request.contains("\"version\":\"1.0.0\""));
+        let body = r#"{"vulns":[{"id":"GHSA-one","aliases":["CVE-2024-0001"],"database_specific":{"severity":"HIGH"},"summary":"Example high"},{"id":"GHSA-two","aliases":["CVE-2024-0002"],"database_specific":{"severity":"CRITICAL"},"summary":"Example critical"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    let client = RegistryClient::new(
+        RegistryUrls {
+            osv: format!("http://{address}"),
+            ..RegistryUrls::default()
+        },
+        false,
+    );
+
+    let vulnerabilities = client
+        .query_vulnerabilities(&dependency("express"))
+        .await
+        .unwrap();
+    server.join().unwrap();
+
+    assert_eq!(vulnerabilities.len(), 2);
+    assert_eq!(vulnerabilities[0].aliases[0], "CVE-2024-0001");
+    assert_eq!(
+        appchecker::deps::highest_vulnerability_severity(&vulnerabilities),
+        appchecker::deps::VulnerabilitySeverity::Critical
+    );
+}
+
+#[tokio::test]
+async fn osv_failure_is_not_reported_as_no_known_vulnerabilities() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buffer = [0_u8; 2048];
+        let _ = stream.read(&mut buffer).unwrap();
+        let body = "upstream unavailable";
+        let response = format!(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    let client = RegistryClient::new(
+        RegistryUrls {
+            osv: format!("http://{address}"),
+            ..RegistryUrls::default()
+        },
+        false,
+    );
+
+    let error = client
+        .query_vulnerabilities(&dependency("express"))
+        .await
+        .unwrap_err();
+    server.join().unwrap();
+    assert!(error.to_string().contains("503"));
+}
+
+#[tokio::test]
+async fn air_gap_skips_osv_without_contacting_a_server() {
+    let client = RegistryClient::new(RegistryUrls::default(), true);
+    let error = client
+        .query_vulnerabilities(&dependency("express"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("air-gap"));
+}
+
+#[tokio::test]
+#[ignore = "requires network access to the public OSV service"]
+async fn live_osv_queries_the_real_service() {
+    let mut dependency = dependency("requests");
+    dependency.ecosystem = Ecosystem::Pip;
+    dependency.current_version = "2.31.0".into();
+    let client = RegistryClient::new(RegistryUrls::default(), false);
+    let result = client.query_vulnerabilities(&dependency).await;
+    assert!(result.is_ok(), "live OSV query failed: {result:?}");
+}

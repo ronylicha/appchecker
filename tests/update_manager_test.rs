@@ -38,7 +38,12 @@ fn builds_native_commands_without_a_shell() {
             "5.3.0",
             true,
             "npm",
-            vec!["install", "typescript@5.3.0", "--save-dev"],
+            vec![
+                "install",
+                "typescript@5.3.0",
+                "--ignore-scripts",
+                "--save-dev",
+            ],
         ),
         (
             Ecosystem::Cargo,
@@ -67,6 +72,7 @@ fn builds_native_commands_without_a_shell() {
                 "phpunit/phpunit:10.5.0",
                 "--with-all-dependencies",
                 "--no-interaction",
+                "--no-scripts",
                 "--dev",
             ],
         ),
@@ -310,8 +316,8 @@ fn returns_the_package_manager_error_output() {
         current_version: "1.0.0".into(),
         target_version: "2.0.0".into(),
         action: UpdateAction::Command {
-            program: script.to_string_lossy().to_string(),
-            args: vec![],
+            program: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().to_string()],
         },
     };
 
@@ -341,8 +347,8 @@ fn cancels_a_hanging_package_manager_without_waiting_for_it() {
         current_version: "1.0.0".into(),
         target_version: "2.0.0".into(),
         action: UpdateAction::Command {
-            program: script.to_string_lossy().to_string(),
-            args: vec![],
+            program: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().to_string()],
         },
     };
     let cancel = Arc::new(AtomicBool::new(false));
@@ -383,8 +389,8 @@ fn drains_large_package_manager_output_without_deadlocking() {
         current_version: "1.0.0".into(),
         target_version: "2.0.0".into(),
         action: UpdateAction::Command {
-            program: script.to_string_lossy().to_string(),
-            args: vec![],
+            program: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().to_string()],
         },
     };
 
@@ -413,8 +419,8 @@ fn cancellation_does_not_require_python_on_the_path() {
         current_version: "1.0.0".into(),
         target_version: "2.0.0".into(),
         action: UpdateAction::Command {
-            program: script.to_string_lossy().to_string(),
-            args: vec![],
+            program: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().to_string()],
         },
     };
     let cancel = Arc::new(AtomicBool::new(false));
@@ -453,8 +459,8 @@ fn package_managers_receive_closed_stdin_instead_of_the_tui_terminal() {
         current_version: "1.0.0".into(),
         target_version: "2.0.0".into(),
         action: UpdateAction::Command {
-            program: script.to_string_lossy().to_string(),
-            args: vec![],
+            program: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().to_string()],
         },
     };
     let outcome = UpdateManager::execute(&plan).unwrap();

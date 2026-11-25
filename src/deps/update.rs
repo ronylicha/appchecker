@@ -85,7 +85,11 @@ impl UpdateManager {
         let package = dependency.name.clone();
         let action = match dependency.ecosystem {
             Ecosystem::Npm => {
-                let mut args = vec!["install".into(), format!("{package}@{target}")];
+                let mut args = vec![
+                    "install".into(),
+                    format!("{package}@{target}"),
+                    "--ignore-scripts".into(),
+                ];
                 if dependency.dev_dependency {
                     args.push("--save-dev".into());
                 }
@@ -114,6 +118,7 @@ impl UpdateManager {
                     format!("{package}:{}", target.trim_start_matches('v')),
                     "--with-all-dependencies".into(),
                     "--no-interaction".into(),
+                    "--no-scripts".into(),
                 ];
                 if dependency.dev_dependency {
                     args.push("--dev".into());
@@ -165,6 +170,19 @@ impl UpdateManager {
         plan: &UpdatePlan,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Result<UpdateOutcome> {
+        Self::execute_with_policy(plan, cancel, true)
+    }
+
+    pub fn execute_with_policy(
+        plan: &UpdatePlan,
+        cancel: Option<Arc<AtomicBool>>,
+        trusted_for_scripts: bool,
+    ) -> Result<UpdateOutcome> {
+        if plan.ecosystem == Ecosystem::Gem && !trusted_for_scripts {
+            return Err(AppError::Other(
+                "Ruby updates require explicit trust because Bundler can run gem extensions".into(),
+            ));
+        }
         if cancel
             .as_ref()
             .is_some_and(|flag| flag.load(Ordering::Relaxed))
@@ -183,6 +201,36 @@ impl UpdateManager {
                 args,
             } => Self::execute_manifest_then_command(plan, path, *format, program, args, cancel),
         }
+    }
+
+    pub fn validate_plan(plan: &UpdatePlan) -> Result<()> {
+        let dependency = DepsParser::detect_and_parse(&plan.project_path)
+            .into_iter()
+            .find(|dependency| {
+                dependency.name == plan.package
+                    && dependency.ecosystem == plan.ecosystem
+                    && dependency.manifest_name.as_deref()
+                        == match &plan.action {
+                            UpdateAction::Command { program, args } if program == "cargo" => args
+                                .windows(2)
+                                .find(|pair| pair[0] == "--rename")
+                                .map(|pair| pair[1].as_str()),
+                            _ => None,
+                        }
+            })
+            .ok_or_else(|| {
+                AppError::Other(format!(
+                    "{} is no longer declared in this project; scan and review again",
+                    plan.package
+                ))
+            })?;
+        if dependency.current_version != plan.current_version {
+            return Err(AppError::Other(format!(
+                "{} changed from {} to {}; scan and review again",
+                plan.package, plan.current_version, dependency.current_version
+            )));
+        }
+        Ok(())
     }
 
     fn execute_command(

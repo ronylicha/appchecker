@@ -9,13 +9,24 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_BUILD_JOBS: 2
+
 jobs:
   check:
-    name: Format, lint, test, and build
+    name: Format, lint, test, native startup, and build
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install native GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libdbus-1-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libgl1-mesa-dev libegl1-mesa-dev \
+            xvfb xauth weston wayland-protocols
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -30,6 +41,41 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked
+
+      - name: Verify native startup on X11
+        run: |
+          mkdir -p target/tmp/xdg-data
+          xvfb-run -a bash -c '
+            set -u
+            timeout 10s env WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 \
+              XDG_DATA_HOME="$PWD/target/tmp/xdg-data" \
+              target/debug/appchecker --config "$PWD/target/tmp/ci-config.toml" gui \
+              >target/tmp/x11.log 2>&1
+            code=$?
+            cat target/tmp/x11.log
+            test "$code" -eq 124
+          '
+
+      - name: Verify native startup on Wayland
+        run: |
+          mkdir -p target/tmp/xdg-data target/tmp/runtime
+          chmod 700 target/tmp/runtime
+          weston --backend=headless-backend.so --no-config \
+            --socket=appchecker-ci >target/tmp/weston.log 2>&1 &
+          weston_pid=$!
+          trap 'kill "$weston_pid" 2>/dev/null || true' EXIT
+          sleep 3
+          set +e
+          timeout 10s env WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 \
+            XDG_RUNTIME_DIR="$PWD/target/tmp/runtime" \
+            WAYLAND_DISPLAY=appchecker-ci \
+            XDG_DATA_HOME="$PWD/target/tmp/xdg-data" \
+            target/debug/appchecker --config "$PWD/target/tmp/ci-config.toml" gui \
+            >target/tmp/wayland.log 2>&1
+          code=$?
+          set -e
+          cat target/tmp/weston.log target/tmp/wayland.log
+          test "$code" -eq 124
 
       - name: Build release
         run: cargo build --release --locked
