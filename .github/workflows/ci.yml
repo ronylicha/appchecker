@@ -60,7 +60,8 @@ jobs:
         run: |
           mkdir -p target/tmp/xdg-data target/tmp/runtime
           chmod 700 target/tmp/runtime
-          weston --backend=headless-backend.so --no-config \
+          XDG_RUNTIME_DIR="$PWD/target/tmp/runtime" \
+            weston --backend=headless-backend.so --no-config \
             --socket=appchecker-ci >target/tmp/weston.log 2>&1 &
           weston_pid=$!
           trap 'kill "$weston_pid" 2>/dev/null || true' EXIT
