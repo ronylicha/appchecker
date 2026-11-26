@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-26
+
+### Added
+
+- Direct API providers beside the existing CLI integrations: OpenRouter, Kimi for Coding non-CN, Z.AI Coding Plan non-CN, Alibaba Cloud Coding Plan non-CN, generic Anthropic, and generic OpenAI.
+- OpenRouter's live model catalog with input/output prices per million tokens, plus dynamic OpenAI, Anthropic, and Alibaba model catalogs and custom model IDs.
+- Official non-CN endpoints: `api.kimi.ai/coding/v1`, `api.z.ai/api/coding/paas/v4`, and `coding-intl.dashscope.aliyuncs.com/v1`.
+- Secure API-key storage in the desktop Secret Service keyring, with environment-variable fallbacks and no plaintext keys in configuration files.
+- Structured Anthropic tool responses and OpenAI-compatible JSON-schema remediation with bounded input, output, timeouts, and explicit provider errors.
+- Local HTTP contract tests for selected models, approved source files, pricing, authentication headers, and structured responses.
+
+### Changed
+
+- API keys moved out of provider configuration and are now editable through the native provider panel without being displayed after saving.
+
 ## [0.3.0] - 2026-11-26
 
 ### Added
@@ -132,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create missing parent directories before opening the SQLite database, allowing the daemon to start with a fresh data directory.
 - Forward command-line arguments correctly through the AppImage launcher.
 
+[0.4.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ronylicha/appchecker/releases/tag/v0.1.0

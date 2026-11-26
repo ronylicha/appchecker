@@ -43,16 +43,16 @@ sudo cp target/release/appchecker /usr/local/bin/
 ### Debian/Ubuntu (.deb)
 
 ```bash
-wget https://github.com/ronylicha/appchecker/releases/download/v0.3.0/appchecker_0.3.0-1_amd64.deb
-sudo apt install ./appchecker_0.3.0-1_amd64.deb
+wget https://github.com/ronylicha/appchecker/releases/download/v0.4.0/appchecker_0.4.0-1_amd64.deb
+sudo apt install ./appchecker_0.4.0-1_amd64.deb
 ```
 
 ### AppImage (portable, no install)
 
 ```bash
-wget https://github.com/ronylicha/appchecker/releases/download/v0.3.0/appchecker-0.3.0-x86_64.AppImage
-chmod +x appchecker-0.3.0-x86_64.AppImage
-./appchecker-0.3.0-x86_64.AppImage
+wget https://github.com/ronylicha/appchecker/releases/download/v0.4.0/appchecker-0.4.0-x86_64.AppImage
+chmod +x appchecker-0.4.0-x86_64.AppImage
+./appchecker-0.4.0-x86_64.AppImage
 ```
 
 ### Omarchy / Arch Linux (PKGBUILD)
@@ -105,6 +105,21 @@ The GUI uses the system graphics stack (Wayland or X11). The AppImage defaults t
 Install the official `claude`, `codex` and/or `agy` executable, then choose **Connect with OAuth** in AI remediation. AppChecker opens `claude auth login`, `codex login`, or Antigravity's interactive sign-in in a real terminal and checks `claude auth status --text`, `codex login status`, or `agy models`. It never reads, displays, or stores provider tokens.
 
 Use the **Model** selector to choose the provider default or a model from the installed CLI: latest aliases reported by `claude --help`, the visible API catalog from `codex debug models`, or the full dynamic catalog from `agy models`. Antigravity additionally requires an explicit per-session acknowledgement: Google does not support third-party headless use on consumer plans; use a supported Enterprise/API route or accept responsibility for that run.
+
+### Direct API providers
+
+The provider panel also supports direct HTTP APIs. Save each key in the desktop Secret Service keyring; it is never displayed after saving and is not written to `config.toml`. Environment variables are supported as fallbacks.
+
+| Provider | Non-CN / default base URL | Key variable |
+| --- | --- | --- |
+| OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| Kimi for Coding | `https://api.kimi.ai/coding/v1` | `KIMI_API_KEY` |
+| Z.AI Coding Plan | `https://api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY` |
+| Alibaba Cloud Coding Plan | `https://coding-intl.dashscope.aliyuncs.com/v1` | `ALIBABA_CLOUD_API_KEY` |
+| Anthropic | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` |
+| OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+
+OpenRouter models include their live input/output prices **per million tokens**. Kimi offers the six model IDs documented by Kimi for Coding; Z.AI offers the documented `glm-5.4` and `glm-5.3-flash`. OpenAI, Anthropic, and Alibaba catalogs are loaded from their APIs, and a custom model ID can be entered for any direct provider. Z.AI and Alibaba Coding Plan keys must be used only within their supported coding-tool scopes and plan terms.
 
 Choose the exact source files, review the consent, and only then run analysis. Files are size-bounded, redacted and copied to a disposable directory. Air-gap mode disables provider calls. The provider can return structured findings and a patch but cannot execute commands. Authentication or subscription errors are shown verbatim; AppChecker never fabricates an analysis.
 
@@ -223,7 +238,7 @@ Registry concurrency is limited to 1–256 checks. AppChecker respects project a
 
 When air-gap mode is disabled, AppChecker sends public dependency names, ecosystems and exact installed versions to the configured registries and to OSV. “No known CVE” means OSV returned no entry for that exact version; it is not a guarantee that the package is safe. OSV failures remain visible as “CVE unavailable”. Air-gap mode makes no OSV request.
 
-AI providers receive only the files explicitly approved for one analysis. Secrets are redacted before provider invocation, and temporary analysis directories are deleted afterward. Provider authentication remains in the official CLI's own credential store. Reviewed patch backups live outside the repository with restrictive permissions.
+AI providers receive only the files explicitly approved for one analysis. Secrets are redacted before provider invocation, and temporary analysis directories are deleted afterward. Provider authentication remains in the official CLI's own credential store or in the desktop Secret Service keyring for direct API keys. Reviewed patch backups live outside the repository with restrictive permissions.
 
 ## 🏗️ Architecture
 

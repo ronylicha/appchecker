@@ -40,6 +40,8 @@ impl DesktopApp {
         self.ai_status = None;
         self.ai_models.clear();
         self.ai_model = None;
+        self.ai_custom_model.clear();
+        self.api_key_input.clear();
         self.ai_analysis = None;
         self.ai_error = None;
         self.refresh_ai_status();
@@ -63,12 +65,46 @@ impl DesktopApp {
     }
 
     pub(crate) fn connect_ai_provider(&mut self) {
+        if self.ai_provider.is_api() {
+            self.save_api_key();
+            return;
+        }
         match launch_login(self.ai_provider) {
             Ok(()) => {
                 self.ai_notice =
                     Some("Finish signing in in the terminal, then choose Refresh status.".into());
             }
             Err(error) => self.ai_error = Some(error.to_string()),
+        }
+    }
+
+    pub(crate) fn save_api_key(&mut self) {
+        match super::credentials::set(self.ai_provider, &self.api_key_input) {
+            Ok(()) => {
+                self.api_key_input.clear();
+                self.ai_notice = Some("API key stored in the system keyring.".into());
+                self.refresh_ai_status();
+            }
+            Err(error) => self.ai_error = Some(error.to_string()),
+        }
+    }
+
+    pub(crate) fn delete_api_key(&mut self) {
+        match super::credentials::delete(self.ai_provider) {
+            Ok(()) => {
+                self.ai_notice = Some("API key removed from the system keyring.".into());
+                self.refresh_ai_status();
+            }
+            Err(error) => self.ai_error = Some(error.to_string()),
+        }
+    }
+
+    pub(crate) fn effective_model(&self) -> Option<String> {
+        let custom = self.ai_custom_model.trim();
+        if custom.is_empty() {
+            self.ai_model.clone()
+        } else {
+            Some(custom.to_string())
         }
     }
 
@@ -112,6 +148,11 @@ impl DesktopApp {
             self.ai_error = Some("Select a project first.".into());
             return;
         };
+        if self.ai_provider.is_api() && self.effective_model().is_none() {
+            self.ai_error =
+                Some("Select a catalog model or enter a custom model ID before analysis.".into());
+            return;
+        }
         if self.ai_provider == AiProvider::Antigravity && !self.antigravity_terms_accepted {
             self.ai_error = Some(
                 "Review and accept the third-party Antigravity usage conditions before analysis."
@@ -145,7 +186,7 @@ impl DesktopApp {
             self.ai_provider.label(),
             self.ai_files.len()
         ));
-        let client = ProviderClient::new(self.ai_provider).with_model(self.ai_model.clone());
+        let client = ProviderClient::new(self.ai_provider).with_model(self.effective_model());
         let files = self.ai_files.clone();
         let root = self.backup_root.join("ai-analysis");
         let sender = self.ai_sender.clone();
@@ -368,11 +409,13 @@ impl DesktopApp {
                 .add_enabled(
                     self.ai_consent
                         && !self.ai_busy
+                        && (!self.ai_provider.is_api() || self.effective_model().is_some())
                         && (self.ai_provider != AiProvider::Antigravity
                             || self.antigravity_terms_accepted),
                     primary_action(
                         self.ai_consent
                             && !self.ai_busy
+                            && (!self.ai_provider.is_api() || self.effective_model().is_some())
                             && (self.ai_provider != AiProvider::Antigravity
                                 || self.antigravity_terms_accepted),
                         "Analyze breaking changes",
@@ -407,6 +450,12 @@ impl DesktopApp {
                 AiProvider::Claude,
                 AiProvider::Codex,
                 AiProvider::Antigravity,
+                AiProvider::OpenRouter,
+                AiProvider::Kimi,
+                AiProvider::Zai,
+                AiProvider::Alibaba,
+                AiProvider::Anthropic,
+                AiProvider::OpenAi,
             ] {
                 let selected = self.ai_provider == provider;
                 if secondary_button(provider.label(), tokens)
@@ -430,16 +479,35 @@ impl DesktopApp {
             {
                 self.refresh_ai_status();
             }
-            if primary_button("Connect with OAuth", tokens)
-                .ui(ui)
-                .clicked()
-            {
+            let action_label = if self.ai_provider.is_api() {
+                "Save API key"
+            } else {
+                "Connect with OAuth"
+            };
+            if primary_button(action_label, tokens).ui(ui).clicked() {
                 self.connect_ai_provider();
             }
             if self.ai_status_busy {
                 ui.spinner();
             }
         });
+        if self.ai_provider.is_api() {
+            ui.horizontal_wrapped(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.api_key_input)
+                        .hint_text("API key (system keyring)")
+                        .password(true)
+                        .desired_width(300.0),
+                );
+                if secondary_button("Delete stored key", tokens)
+                    .ui(ui)
+                    .clicked()
+                {
+                    self.delete_api_key();
+                }
+            });
+            ui.add_space(6.0);
+        }
         ui.add_space(8.0);
         if self.ai_models.is_empty() {
             if !self.ai_status_busy {
@@ -457,33 +525,69 @@ impl DesktopApp {
                     self.ai_models
                         .iter()
                         .find(|model| &model.id == id)
-                        .map(|model| model.label.clone())
+                        .map(|model| {
+                            model
+                                .pricing
+                                .as_ref()
+                                .map(|pricing| {
+                                    format!(
+                                        "{} · in {} / out {} per 1M tokens",
+                                        model.label,
+                                        pricing.input_per_million,
+                                        pricing.output_per_million
+                                    )
+                                })
+                                .unwrap_or_else(|| model.label.clone())
+                        })
                 })
                 .unwrap_or_else(|| "Provider default".into());
             let models = self.ai_models.clone();
             egui::ComboBox::from_label("Model")
                 .selected_text(selected)
+                .height(420.0)
                 .show_ui(ui, |ui| {
                     if ui
                         .selectable_label(self.ai_model.is_none(), "Provider default")
                         .clicked()
                     {
                         self.ai_model = None;
+                        self.ai_custom_model.clear();
                         self.ai_analysis = None;
                     }
                     for model in models {
+                        let label = model
+                            .pricing
+                            .as_ref()
+                            .map(|pricing| {
+                                format!(
+                                    "{} · in {} / out {} per 1M tokens",
+                                    model.label,
+                                    pricing.input_per_million,
+                                    pricing.output_per_million
+                                )
+                            })
+                            .unwrap_or_else(|| model.label.clone());
                         if ui
                             .selectable_label(
                                 self.ai_model.as_deref() == Some(model.id.as_str()),
-                                &model.label,
+                                &label,
                             )
                             .clicked()
                         {
                             self.ai_model = Some(model.id);
+                            self.ai_custom_model.clear();
                             self.ai_analysis = None;
                         }
                     }
                 });
+        }
+        if self.ai_provider.is_api() {
+            ui.add_space(6.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.ai_custom_model)
+                    .hint_text("Custom model ID (overrides the catalog)")
+                    .desired_width(360.0),
+            );
         }
         if self.ai_provider == AiProvider::Antigravity {
             ui.add_space(8.0);

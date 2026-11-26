@@ -16,6 +16,12 @@ pub enum AiProvider {
     Claude,
     Codex,
     Antigravity,
+    OpenRouter,
+    Kimi,
+    Zai,
+    Alibaba,
+    Anthropic,
+    OpenAi,
 }
 
 impl AiProvider {
@@ -24,6 +30,30 @@ impl AiProvider {
             Self::Claude => "Claude Code",
             Self::Codex => "ChatGPT / Codex",
             Self::Antigravity => "Antigravity / Gemini",
+            Self::OpenRouter => "OpenRouter",
+            Self::Kimi => "Kimi for Coding (non-CN)",
+            Self::Zai => "Z.AI Coding Plan (non-CN)",
+            Self::Alibaba => "Alibaba Cloud Coding Plan (non-CN)",
+            Self::Anthropic => "Anthropic API",
+            Self::OpenAi => "OpenAI API",
+        }
+    }
+
+    pub fn is_api(self) -> bool {
+        !matches!(self, Self::Claude | Self::Codex | Self::Antigravity)
+    }
+
+    pub fn env_var(self) -> &'static str {
+        match self {
+            Self::Claude => "CLAUDE_API_KEY",
+            Self::Codex => "CODEX_API_KEY",
+            Self::Antigravity => "ANTIGRAVITY_API_KEY",
+            Self::OpenRouter => "OPENROUTER_API_KEY",
+            Self::Kimi => "KIMI_API_KEY",
+            Self::Zai => "ZAI_API_KEY",
+            Self::Alibaba => "ALIBABA_CLOUD_API_KEY",
+            Self::Anthropic => "ANTHROPIC_API_KEY",
+            Self::OpenAi => "OPENAI_API_KEY",
         }
     }
 
@@ -32,6 +62,7 @@ impl AiProvider {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Antigravity => "agy",
+            _ => "",
         }
     }
 
@@ -40,6 +71,12 @@ impl AiProvider {
             Self::Claude => "Install Claude Code, then run 'claude auth login'",
             Self::Codex => "Install Codex, then run 'codex login'",
             Self::Antigravity => "Install Antigravity CLI, then run 'agy' to sign in",
+            Self::OpenRouter
+            | Self::Kimi
+            | Self::Zai
+            | Self::Alibaba
+            | Self::Anthropic
+            | Self::OpenAi => "Configure the API key in the system keyring",
         }
     }
 }
@@ -51,9 +88,16 @@ pub enum ProviderStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelPricing {
+    pub input_per_million: String,
+    pub output_per_million: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelInfo {
     pub id: String,
     pub label: String,
+    pub pricing: Option<ModelPricing>,
 }
 
 #[derive(Debug)]
@@ -61,6 +105,7 @@ pub struct ProviderClient {
     provider: AiProvider,
     program: PathBuf,
     model: Option<String>,
+    api_key: Option<String>,
 }
 
 impl ProviderClient {
@@ -69,6 +114,7 @@ impl ProviderClient {
             provider,
             program: provider.default_program().into(),
             model: None,
+            api_key: super::credentials::get(provider).ok().flatten(),
         }
     }
 
@@ -77,6 +123,7 @@ impl ProviderClient {
             provider,
             program: program.into(),
             model: None,
+            api_key: None,
         }
     }
 
@@ -86,10 +133,15 @@ impl ProviderClient {
     }
 
     pub fn models(&self) -> Result<Vec<ModelInfo>> {
+        if self.provider.is_api() {
+            return super::api::ApiClient::from_provider(self.provider, self.api_key.clone())
+                .models();
+        }
         let args: &[&str] = match self.provider {
             AiProvider::Claude => &["--help"],
             AiProvider::Codex => &["debug", "models"],
             AiProvider::Antigravity => &["models"],
+            _ => unreachable!(),
         };
         let output = Command::new(&self.program)
             .args(args)
@@ -109,10 +161,24 @@ impl ProviderClient {
     }
 
     pub fn status(&self) -> Result<ProviderStatus> {
+        if self.provider.is_api() {
+            return if self
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+            {
+                Ok(ProviderStatus::Authenticated(
+                    "API key configured in the system keyring".into(),
+                ))
+            } else {
+                Ok(ProviderStatus::Unauthenticated)
+            };
+        }
         let args: &[&str] = match self.provider {
             AiProvider::Claude => &["auth", "status", "--text"],
             AiProvider::Codex => &["login", "status"],
             AiProvider::Antigravity => &["models"],
+            _ => unreachable!(),
         };
         let output = Command::new(&self.program)
             .args(args)
@@ -138,6 +204,10 @@ impl ProviderClient {
             return Err(AppError::Other(
                 "AI analysis is unavailable in air-gap mode".into(),
             ));
+        }
+        if self.provider.is_api() {
+            return super::api::ApiClient::from_provider(self.provider, self.api_key.clone())
+                .analyze(prepared, self.model.clone());
         }
         match self.status()? {
             ProviderStatus::Authenticated(_) => {}
@@ -208,6 +278,7 @@ impl ProviderClient {
                     ])
                     .arg(format!("--print={prompt}"));
             }
+            _ => unreachable!(),
         }
         if let Some(model) = &self.model {
             command.args(["--model", model]);
@@ -237,6 +308,7 @@ impl ProviderClient {
             AiProvider::Claude => String::from_utf8_lossy(&output.stdout).to_string(),
             AiProvider::Codex => std::fs::read_to_string(response_path)?,
             AiProvider::Antigravity => String::from_utf8_lossy(&output.stdout).to_string(),
+            _ => unreachable!(),
         };
         parse_analysis_response(&response)
     }
@@ -255,6 +327,20 @@ impl PreparedAnalysis {
 
     pub fn files(&self) -> &[PathBuf] {
         &self.files
+    }
+
+    pub(crate) fn prompt_with_sources(&self) -> String {
+        let mut prompt = self.prompt();
+        for file in &self.files {
+            if let Ok(content) = std::fs::read_to_string(self.directory.join(file)) {
+                prompt.push_str(&format!(
+                    "\n\n<file path=\"{}\">\n{}\n</file>",
+                    file.display(),
+                    content
+                ));
+            }
+        }
+        prompt
     }
 
     fn prompt(&self) -> String {
@@ -374,10 +460,16 @@ pub fn guided_login(provider: AiProvider) -> &'static str {
         AiProvider::Claude => "claude auth login",
         AiProvider::Codex => "codex login",
         AiProvider::Antigravity => "agy",
+        _ => "Configure the API key in AppChecker",
     }
 }
 
 pub fn launch_login(provider: AiProvider) -> Result<()> {
+    if provider.is_api() {
+        return Err(AppError::Other(
+            "Use Save API key for this provider instead of OAuth".into(),
+        ));
+    }
     let mut terminals = Vec::new();
     if let Some(terminal) = std::env::var_os("TERMINAL") {
         terminals.push(PathBuf::from(terminal));
@@ -395,6 +487,7 @@ pub fn launch_login(provider: AiProvider) -> Result<()> {
                 AiProvider::Claude => vec!["auth", "login"],
                 AiProvider::Codex => vec!["login"],
                 AiProvider::Antigravity => vec![],
+                _ => unreachable!(),
             })
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -533,6 +626,7 @@ pub fn parse_models(provider: AiProvider, output: &str) -> Result<Vec<ModelInfo>
             .map(|alias| ModelInfo {
                 id: alias.into(),
                 label: format!("Claude {} (latest)", alias),
+                pricing: None,
             })
             .collect::<Vec<_>>(),
         AiProvider::Codex => {
@@ -561,6 +655,7 @@ pub fn parse_models(provider: AiProvider, output: &str) -> Result<Vec<ModelInfo>
                         ModelInfo {
                             id: model.slug,
                             label: model.display_name,
+                            pricing: None,
                         },
                     )
                 })
@@ -578,9 +673,16 @@ pub fn parse_models(provider: AiProvider, output: &str) -> Result<Vec<ModelInfo>
             .map(|(id, label)| ModelInfo {
                 id: id.trim().to_string(),
                 label: label.trim().to_string(),
+                pricing: None,
             })
             .filter(|model| !model.id.is_empty() && !model.label.is_empty())
             .collect(),
+        _ => {
+            return Err(AppError::Other(format!(
+                "{} is not a CLI provider",
+                provider.label()
+            )));
+        }
     };
     models.dedup_by(|left, right| left.id == right.id);
     if models.is_empty() {
@@ -592,7 +694,7 @@ pub fn parse_models(provider: AiProvider, output: &str) -> Result<Vec<ModelInfo>
     Ok(models)
 }
 
-fn analysis_schema() -> &'static str {
+pub(crate) fn analysis_schema() -> &'static str {
     r#"{"type":"object","additionalProperties":false,"properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"package":{"type":"string"},"summary":{"type":"string"},"breaking_changes":{"type":"array","items":{"type":"string"}}},"required":["package","summary","breaking_changes"]}},"patch":{"type":"string"}},"required":["findings","patch"]}"#
 }
 

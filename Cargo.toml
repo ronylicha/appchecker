@@ -1,6 +1,6 @@
 [package]
 name = "appchecker"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["ronylicha <ronylicha@users.noreply.github.com>"]
 description = "Native Linux desktop and terminal app for monitoring Git repositories and safely updating dependencies"
@@ -80,6 +80,7 @@ eframe = { version = "0.37.0", features = ["persistence"] }
 egui_extras = "0.37.0"
 rfd = "0.18.0"
 sha2 = "0.10"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [profile.release]
 strip = true
