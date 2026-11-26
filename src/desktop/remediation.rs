@@ -48,9 +48,8 @@ impl DesktopApp {
     pub(crate) fn refresh_ai_status(&mut self) {
         if self.config.air_gap_mode {
             self.ai_status_busy = false;
-            self.ai_error = Some(
-                "Provider status and model catalogs are unavailable in air-gap mode.".into(),
-            );
+            self.ai_error =
+                Some("Provider status and model catalogs are unavailable in air-gap mode.".into());
             return;
         }
         self.ai_status_busy = true;
