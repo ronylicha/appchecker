@@ -6,7 +6,7 @@ pkgdesc="Native Linux desktop and terminal app for monitoring Git repositories a
 arch=('x86_64')
 url="https://github.com/ronylicha/appchecker"
 license=('MIT')
-depends=('git' 'libdbus' 'libxkbcommon' 'wayland' 'libxcb' 'libx11' 'mesa')
+depends=('git' 'libdbus' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libxcb' 'libx11' 'mesa')
 makedepends=('rust' 'cargo')
 source=("git+https://github.com/ronylicha/appchecker.git#tag=v${pkgver}")
 sha256sums=('SKIP')

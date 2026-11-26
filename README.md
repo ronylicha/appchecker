@@ -32,7 +32,7 @@ AppChecker keeps track of your development projects in one legible native interf
 ```bash
 # Prerequisites: Rust 1.95+, Git, and a native Linux graphics stack
 # Debian/Ubuntu build dependencies:
-sudo apt install libdbus-1-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
+sudo apt install libdbus-1-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
   libx11-dev libgl1-mesa-dev libegl1-mesa-dev
 git clone https://github.com/ronylicha/appchecker.git
 cd appchecker

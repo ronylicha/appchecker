@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            libdbus-1-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
+            libdbus-1-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-dev libgl1-mesa-dev libegl1-mesa-dev \
             xvfb xauth weston wayland-protocols
 
